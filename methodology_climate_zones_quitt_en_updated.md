@@ -1,849 +1,536 @@
-# Methodology for Calculating Climate Zones Inspired by Quitt’s Classification
+# Info4forest: Climate Areas Inspired by the Quitt Classification
 
-**Purpose of this document:** a methodological description of the climate-zone calculation used by the API. The document is intended for publication in GitLab/GitLab Pages and for linking from OpenAPI/Swagger documentation using `externalDocs`.
+## Description of the Visualisation and Calculation Methodology
 
-**Document version:** 1.1  
-**Date:** 2026-06-04  
-**Methodological basis:** E. Quitt’s climate classification and the methodology described in the publication *Climatic Regions of Czechia: Quitt’s Classification During Years 1961–2000*, published by Palacký University Olomouc and the Czech Hydrometeorological Institute.  
-**Publication link:** <https://www.cartography.upol.cz/MAPS/MAPS_Num3_brozura.pdf>
+**Document version:** 3.0  
+**Revision date:** 2026-07-19  
+**Purpose of the document:** a substantive description of the climate areas shown in the Info4forest application, an explanation of the displayed results, and a transparent methodology for their calculation.  
+**Methodological basis:** the Quitt climate classification and its analysis in the publication issued by Palacký University Olomouc and the Czech Hydrometeorological Institute [1].  
+
+---
+## Contents
+
+1. What Climate Areas Inspired by the Quitt Classification Are
+2. What the Application Displays
+3. How to Read the Main Results
+4. Climate Data Sources and Monitored Locations
+5. Relationship to the Quitt Classification
+6. The Eleven Climate Characteristics Used
+7. Overview of Climate Areas and Units
+8. Methodology for Calculating the Climate Unit
+9. Trend Methodology
+10. Interpretation, Uncertainty, and Limitations
+11. The API as the Data and Calculation Backend
+12. Recommended Citation
+13. Sources
+14. Appendix A – Limit Intervals Used by the Implementation
 
 ---
 
-## 1. Plain-language summary
+## 1. What Climate Areas Inspired by the Quitt Classification Are
 
-The climate-zone calculation works much like filling in a climate questionnaire for each location and then finding which known climate region that location most closely resembles.
+The **WF5 – Forest-related Climate Area Map** tab in the Info4forest application converts climate data into an understandable map of climate areas and related characteristics. The user selects a climate data source, location, and time period. The application then shows which type of climate each place most closely resembles during the selected period.
 
-For each location and selected period, for example 1991–2020, the calculation first derives 11 climate characteristics. These include, for example, the number of summer days, the number of frost days, mean temperature in January, April, July and October, and precipitation totals in the vegetation and winter periods. Together, these characteristics describe whether a location is warmer or colder, drier or wetter, and how pronounced its summer and winter conditions are.
+The result is not based on a single variable such as mean temperature. Eleven temperature- and precipitation-related characteristics are evaluated together for each location. These include the numbers of summer, frost, and ice days; temperatures in four representative months; the number of precipitation days; and seasonal precipitation totals.
 
-The value of each characteristic is then averaged over the selected period. If the user requests a point that does not lie exactly at the centre of an input data cell, the values are interpolated from surrounding cells using IDW, i.e. inverse distance weighting. In this method, closer cells have a stronger influence than more distant cells.
+In simplified terms, the calculation can be understood as **comparing the climate profile of a location with 23 known climate units**. The application selects the unit whose intervals most closely match the location’s profile. The units form a scale from the coldest type, `CH1`, to the warmest type, `T5`.
 
-The resulting 11 values are then compared with a table of Quitt climate units. Quitt’s classification distinguishes units `CH1` to `CH7` for the cold region, `MT1` to `MT11` for the moderately warm region, and `T1` to `T5` for the warm region. Each unit is defined by value ranges, for example how many summer days it should have or what its mean July temperature should be.
+> **Brief explanation for application users:** Climate areas inspired by the Quitt classification show which type of climate the selected location most closely resembles in the chosen period. The calculation compares temperature, precipitation, and other climate indicators with 23 units ranging from cold to warm areas and displays the closest match.
 
-Because real-world data rarely fit exactly into only one unit, the calculation does not use a strict “matches / does not match” rule only. Instead, it uses a similarity score from 0 to 1. A value of 1 means that a characteristic lies inside the interval for the given climate unit. If the value is just outside the interval, it receives a partial score. If it is too far away, it receives a score of 0. The total score of a climate unit is the average of the scores across all 11 characteristics.
-
-The resulting climate zone is the unit with the highest score. If two units receive the same score, the calculation prefers the warmer unit. This follows the principle described in the UPOL methodology for digital assignment according to the maximum number of fulfilled criteria.
-
-The API output is GeoJSON. For each point, the output contains the code of the best-matching climate unit, for example `MT7`, and the value `best_score`, which indicates how well the location corresponds to the selected unit. The score is not a probability; it is a measure of similarity to the intervals in the Quitt table.
-
-
-In addition to the static climate-zone calculation for a selected multi-year period, the API can also calculate trends. Trend endpoints do not compare only the first and last year. They use the annual values for all years in the selected period and estimate a robust Sen slope. This makes the result less sensitive to individual anomalous years. Trends can be calculated either for individual climate characteristics, such as July temperature or vegetation-period precipitation, or for climate zones. Climate-zone trends support two metrics: `expected_fuzzy_rank` and `exceedance_rank_equivalent`.
+The calculation uses 11 characteristics available in the Info4forest data system. It is an algorithmic and reproducible implementation inspired by the Quitt scheme; it is not a simple redrawing of the historical Quitt map.
 
 ---
 
-## 2. Relationship to Quitt’s classification and the UPOL methodology
+## 2. What the Application Displays
 
-Quitt’s climate classification is a complex climatological classification. A territory is not assigned to a class according to a single variable, for example mean temperature alone, but according to a combination of several climatological characteristics. The original Quitt scheme contains 23 climate units in three main regions:
+### 2.1 Selection of Climate Data Source, Location, and Period
 
-- **CH** – cold region (`CH1` to `CH7`),
-- **MT** – moderately warm region (`MT1` to `MT11`),
-- **T** – warm region (`T1` to `T5`).
+The application allows the user to select:
 
-According to the UPOL/CHMI publication, the original Quitt classification distinguishes 23 units defined by combinations of values of 14 climatological characteristics. Unit boundaries are determined by changes in these characteristics, and the individual intervals may partly overlap. The UPOL publication notes that practical implementation of the classification involves uncertainty, because one location may satisfy the characteristics of several units at the same time.
+- a **climate data source**, such as the historical ERA5-Land reanalysis or a future climate model;
+- a **location** for which the source is available;
+- the **start and end year** of the analysed period.
 
-This implementation is **inspired by Quitt’s classification and the UPOL methodology**, but it is not a direct reproduction of the original map or its manual cartographic interpretation. The calculation is algorithmic, repeatable, and based on precomputed gridded climate indicators. Compared with the original set of 14 characteristics, the implementation uses 11 available characteristics. The metadata of the limit table list `PDZAT`, `PDJAS`, `PDSCE` and `PDOBL` as characteristics not used in this implementation.
+The lay name of the source is intended for general users, for example, “Historical climate / ERA5-Land model / 10 × 10 km”. The technical name available in the information tooltip specifies the exact model, regional model, and scenario, for example, `EC-Earth / REMO2020 / SSP3-7.0` [T4].
 
-The main difference from a simple “maximum number of fulfilled criteria” method is that this implementation uses fuzzy scoring. Instead of assigning each characteristic only a value of 0 or 1, a value slightly outside the interval still receives a partial match. This makes the calculation more stable in cases where the values are close to the boundary between climate units.
+### 2.2 Climate Area Map
+
+The main map displays the best-matching climate unit for each mapped location. The colour scale runs from cold units through moderately warm units to warm units. The map provides a spatial overview and makes it possible to identify differences between lowlands, middle elevations, and mountain areas.
+
+After clicking the map, details are displayed for the selected point:
+
+- the climate unit and its verbal description;
+- the internal Czech code, for example `T2`, and the English/atlas code, for example `W2`;
+- the match score;
+- the mean values of the eleven climate characteristics;
+- the climate-unit trend and its statistical significance;
+- the worst continuous adverse deviation from the trend line;
+- trends in the individual climate characteristics.
+
+### 2.3 Climate Area Trend Map
+
+The **Climate Zone Trends** map shows the estimated shift along the climate-unit scale during the selected period. The visualised variable `estimated_total_change` expresses the estimated total change:
+
+- a positive value indicates a shift towards warmer climate units;
+- a negative value indicates a shift towards colder units;
+- a value close to zero indicates little or no systematic shift.
+
+This is a continuous estimated change in unit rank, not a simple subtraction of the first-year code from the last-year code. The calculation uses annual values for the entire period.
+
+### 2.4 Eleven Climate Characteristic Maps
+
+In addition to climate areas, all eleven characteristics can be displayed separately. Each map shows the mean value of the characteristic over the selected period. Its trend is also shown for a selected point; a trend that is not statistically significant is displayed as a dash.
+
+### 2.5 Trend Information for a Selected Point
+
+For a selected point, the application displays:
+
+- **Total change** – the estimated change over the entire period;
+- **Trend per decade** – the estimated change over ten years;
+- **Significant trend: yes/no** – the result of the Mann–Kendall test;
+- **Worst deviation from the trend** – the most severe continuous period of adverse deviations;
+- **Duration** – the length of this episode in years;
+- **Mean deterioration** – the mean magnitude of the adverse deviation during the episode.
+
+In this context, “significant” means **statistically significant**, not automatically ecologically or economically important.
 
 ---
 
-## 3. Input data
+## 3. How to Read the Main Results
 
-The calculation uses a precomputed Rasdaman collection of annual climate indicators. The collection has four dimensions:
+### 3.1 Climate Area and Climate Unit
+
+The Quitt scheme distinguishes three broad areas:
+
+- **CH – Cold area**: `CH1` to `CH7`;
+- **MT – Moderately warm area**: `MT1` to `MT11`;
+- **T – Warm area**: `T1` to `T5`.
+
+The application returns a specific **climate unit**, not only one of the three broad areas. The unit is the closest climate type based on the joint evaluation of all characteristics.
+
+The English version uses the atlas codes `C1–C7`, `MW1–MW11`, and `W1–W5`. The internal calculation codes remain `CH`, `MT`, and `T` [T3].
+
+### 3.2 Match
+
+The **match** value (`best_score`) ranges from 0 to 1. It expresses how well the eleven calculated values fit the intervals of the best climate unit.
+
+- a value close to `1` indicates a very good similarity;
+- an intermediate value indicates partial similarity or a position near the boundaries of several units;
+- a low value indicates that even the best of the 23 units does not match the location particularly well.
+
+The match score is **not a probability**, confidence interval, or proportion of an area. For example, a score of `0.69` must not be interpreted as a 69% probability that the location belongs to the unit.
+
+### 3.3 Mean
+
+For a climate characteristic, “Mean” denotes the arithmetic mean of annual values over the entire selected period. For example, the mean number of summer days for 1990–2009 is the mean of twenty annual values.
+
+### 3.4 Trend and Statistical Significance
+
+The trend is estimated from annual values using Sen’s slope. Statistical significance is assessed using the Mann–Kendall test. If the test does not establish a trend at the selected significance level, the application displays a dash for the trend of the individual characteristic. This does not mean that the value remained unchanged throughout the period; it means that the available series does not provide sufficiently strong evidence of a monotonic trend.
+
+### 3.5 Worst Adverse Episode
+
+The worst episode is the most severe continuous sequence of years in which values were on the adverse side of the robust trend line. The “adverse” direction depends on the characteristic. For example, an increase in summer days is considered an adverse increase by default, whereas a decrease in precipitation during the growing season is considered an adverse decrease [T2].
+
+---
+
+## 4. Climate Data Sources and Monitored Locations
+
+### 4.1 Locations
+
+The application catalogue contains the following locations [T4]:
+
+| Code | Czech name | English name | Bounding box `[minLon, minLat, maxLon, maxLat]` |
+|---|---|---|---|
+| `cz` | Česko | Czechia | `[12.07, 48.48, 18.97, 51.08]` |
+| `sk` | Slovensko | Slovakia | `[16.8174, 47.6296, 22.7629, 49.705]` |
+| `maestrazgo_mount` | pohoří Maestrazgo | Maestrazgo Mountains | `[-1.09395, 39.8289, 0.297912, 40.8966]` |
+| `southern_fi` | Jižní Finsko | Southern Finland | `[20.3719, 58.9769, 32.7637, 63.1035]` |
+
+The bounding box defines the data coverage of the source. It does not automatically represent the administrative boundary of a country or pilot area.
+
+### 4.2 Climate Data Sources
+
+| Name displayed to users | Technical name | Available locations |
+|---|---|---|
+| Historical climate / ERA5-Land model / 10 × 10 km | `ERA5-Land` | `cz` |
+| Future climate, pessimistic scenario / MPI model / 12 × 12 km | `MPI / REMO2020 / SSP3-7.0` | `cz`, `sk`, `maestrazgo_mount`, `southern_fi` |
+| Future climate, pessimistic scenario / EC-Earth model / 12 × 12 km | `EC-Earth / REMO2020 / SSP3-7.0` | `cz`, `sk`, `maestrazgo_mount`, `southern_fi` |
+| Future climate, pessimistic scenario / MIROC model / 12 × 12 km | `MIROC / REMO2020 / SSP3-7.0` | `cz`, `sk`, `maestrazgo_mount`, `southern_fi` |
+
+Historical reanalysis and a climate model are not the same:
+
+- **reanalysis** combines meteorological observations with a numerical model and provides a consistent reconstruction of past climate;
+- a **climate projection** simulates possible future development under a selected emissions/scenario assumption and model chain.
+
+Results from different models should not be understood as exact forecasts for a specific year. They are intended for assessing possible long-term developments and model uncertainty.
+
+---
+
+## 5. Relationship to the Quitt Classification
+
+### 5.1 Original Classification Scheme
+
+The Quitt classification is an example of **complex climatology**: an area is not classified according to one variable, but according to a combination of value classes for several climatological characteristics. The UPOL/CHMI publication describes 23 climate units in three areas, defined by combinations of 14 characteristics [1, pp. 3–6; PDF pp. 4–7].
+
+The original limits were designed for the climatic conditions of Czechoslovakia and were based on historical map sources. The UPOL/CHMI authors note that the intervals of individual units overlap and that practical implementation of the classification involves uncertainty and a degree of expert judgement [1, p. 4; PDF p. 5].
+
+### 5.2 Assignment Uncertainty
+
+The detailed UPOL/CHMI analysis showed that no evaluated grid square satisfied all 14 original criteria, and only 6 to 9 criteria were most commonly satisfied. The same maximum may also occur for more than one unit [1, pp. 13–14; PDF pp. 14–15]. The result should therefore be understood as the **closest climate type**, not as an absolute and error-free boundary.
+
+UPOL/CHMI also describes a digital maximum-number-of-satisfied-criteria method in which the warmer unit is preferred in the event of a tie. At the same time, it notes that different methods can produce different map implementations from the same input data [1, p. 14; PDF p. 15].
+
+### 5.3 What Info4forest Adopts and What It Adds
+
+Info4forest adopts:
+
+- the system of 23 units and three broad areas;
+- the unit codes and verbal characteristics;
+- the interval limits of the climate characteristics used;
+- the orientation of the scale from colder to warmer units.
+
+Info4forest adds its own algorithmic procedures:
+
+- it uses eleven available characteristics;
+- it evaluates similarity using a fuzzy score rather than a purely binary pass/fail rule;
+- it interpolates point values using IDW;
+- it supports any available multi-year period;
+- it calculates robust trends, their statistical significance, and adverse episodes;
+- it works with multiple climate data sources and locations.
+
+The correct designation is therefore **“climate areas inspired by the Quitt classification”**. The output is not identical to the historical Quitt map or the UPOL/CHMI map for 1961–2000.
+
+---
+
+## 6. The Eleven Climate Characteristics Used
+
+| Data index | Code | Name | Unit | Meaning |
+|---:|---|---|---|---|
+| 0 | `SUM25` | Annual number of summer days | days | Number of days on which the daily maximum temperature reaches at least 25 °C. |
+| 1 | `VEG10` | Annual number of days with mean temperature ≥ 10 °C | days | An approximate indicator of the length of the warmer part of the year suitable for vegetation. |
+| 2 | `FROST0` | Annual number of frost days | days | Number of days on which the daily minimum temperature falls below 0 °C. |
+| 3 | `ICE0` | Annual number of ice days | days | Number of days on which the daily maximum temperature remains below 0 °C. |
+| 4 | `T_JAN` | Mean January temperature | °C | Characteristic of mid-winter temperature conditions. |
+| 5 | `T_APR` | Mean April temperature | °C | Characteristic of spring temperature conditions. |
+| 6 | `T_JUL` | Mean July temperature | °C | Characteristic of mid-summer temperature conditions. |
+| 7 | `T_OCT` | Mean October temperature | °C | Characteristic of autumn temperature conditions. |
+| 8 | `RAIN1` | Annual number of precipitation days ≥ 1 mm | days | Number of days with a precipitation total of at least 1 mm. |
+| 9 | `P_APR_SEP` | Precipitation total, April–September | mm | Total precipitation during the growing-season part of the year, from April to September. |
+| 10 | `P_OCT_MAR` | Precipitation total, October–March | mm | Total precipitation during the cold part of the year, from October to March. |
+
+The original Quitt scheme uses 14 characteristics [1, pp. 4–7; PDF pp. 5–8]. Info4forest uses eleven characteristics available in the harmonised WF5 data structure. Characteristics related to snow cover, cloudiness, and clear/overcast days are not included. This reduction is one reason why the output is described as inspired by the classification rather than as its complete reproduction.
+
+---
+
+## 7. Overview of Climate Areas and Units
+
+### 7.1 Indicative Scale
 
 ```text
-[year, ind, y, x]
+COLDEST                                                               WARMEST
+CH1 → CH2 → CH3 → CH4 → CH5 → CH6 → CH7 → MT1 → … → MT11 → T1 → T2 → T3 → T4 → T5
+│--------------- cold area ---------------││---- moderately warm area ----││-- warm --│
 ```
 
-where:
+The order is an indicative climate scale used by the calculation. A difference of one rank cannot automatically be interpreted as a constant physical change in temperature or precipitation; neighbouring units are defined by a combination of several variables.
 
-- `year` is the calendar year,
-- `ind` is the climate-characteristic index from 0 to 10,
-- `y` is the row index of the spatial grid,
-- `x` is the column index of the spatial grid.
+### 7.2 Overview of All 23 Units
 
-Example of a production collection in the attached registry:
+The verbal characteristics in the following table are based on Table 1 of the UPOL/CHMI publication [1, pp. 4–5; PDF pp. 5–6] and are normalised according to the application metadata [T3].
+
+| Internal code | English/atlas code | English name | Verbal characteristic |
+|---|---|---|---|
+| `CH1` | `C1` | Cold 1 | Very short, cold, very wet summer; very long transition period with a very cold spring and cold autumn; very long, very cold, very wet winter with a very long duration of snow cover. |
+| `CH2` | `C2` | Cold 2 | Very short, cold, very wet summer, but with a lower precipitation total than C1; very long transition period with a very cold spring and cold autumn; very long, very cold, very wet winter, but with a lower precipitation total than C1, and a very long duration of snow cover. |
+| `CH3` | `C3` | Cold 3 | Very short, cold, wet summer; very long transition period with a very cold to cold spring and cold autumn; very long, very cold, wet winter with a very long duration of snow cover. |
+| `CH4` | `C4` | Cold 4 | Very short, cold, wet summer; very long transition period with a cold spring and moderately cold autumn; very long, very cold, wet winter with a very long duration of snow cover. |
+| `CH5` | `C5` | Cold 5 | Very short to short, moderately cold, wet summer; long transition period with a cold spring and moderately cold autumn; very long, cold, moderately wet winter with a long duration of snow cover. |
+| `CH6` | `C6` | Cold 6 | Very short to short, moderately cold, wet to very wet summer; long transition period with a cold spring and moderately cold autumn; very long, moderately cold, wet winter with a long duration of snow cover. |
+| `CH7` | `C7` | Cold 7 | Very short to short, moderately cold, wet summer; long transition period with a moderately cold spring and mild autumn; long, mild, moderately wet winter with a long duration of snow cover. |
+| `MT1` | `MW1` | Moderately Warm 1 | Short, moderately cold, wet summer; very long transition period with a moderately cold spring and mild autumn; normally long, cold, dry to moderately dry winter with a long duration of snow cover. |
+| `MT2` | `MW2` | Moderately Warm 2 | Short, mild to moderately cold, moderately wet summer; short transition period with a mild spring and mild autumn; normally long winter with mild temperatures, dry conditions, and a normally long duration of snow cover. |
+| `MT3` | `MW3` | Moderately Warm 3 | Short, mild to moderately cold, dry to moderately dry summer; normal to long transition period with a mild spring and mild autumn; normally long, mild to moderately cold, dry to moderately dry winter with a normal to short duration of snow cover. |
+| `MT4` | `MW4` | Moderately Warm 4 | Short, mild, dry to moderately dry summer; short transition period with a mild spring and mild autumn; normally long, moderately warm, dry winter with a short duration of snow cover. |
+| `MT5` | `MW5` | Moderately Warm 5 | Normally long to short, mild to moderately cold, dry to moderately dry summer; normal to long transition period with a mild spring and mild autumn; normally long, moderately cold, dry to moderately dry winter with a normal duration of snow cover. |
+| `MT6` | `MW6` | Moderately Warm 6 | Normally long to long, mild, moderately wet summer; normal to long transition period with a mild to moderately warm spring and mild autumn; normally long, cold, dry to moderately dry winter with a normal duration of snow cover. |
+| `MT7` | `MW7` | Moderately Warm 7 | Normally long, mild, moderately dry summer; short transition period with a mild spring and moderately warm autumn; normally long, moderately warm, dry to moderately dry winter with a short duration of snow cover. |
+| `MT8` | `MW8` | Moderately Warm 8 | Long, warm, moderately wet summer; normally long transition period with a moderately warm spring and moderately warm autumn; normally long, mild to moderately cold, dry winter with a short duration of snow cover. |
+| `MT9` | `MW9` | Moderately Warm 9 | Long, warm, dry to moderately dry summer; short transition period with a mild to moderately warm spring and moderately warm autumn; short, mild, dry winter with a short duration of snow cover. |
+| `MT10` | `MW10` | Moderately Warm 10 | Long, warm, moderately dry summer; short transition period with a moderately warm spring and moderately warm autumn; short, moderately warm, very dry winter with a short duration of snow cover. |
+| `MT11` | `MW11` | Moderately Warm 11 | Long, warm, dry summer; short transition period with a moderately warm spring and moderately warm autumn; short, warm, very dry winter with a short duration of snow cover. |
+| `T1` | `W1` | Warm 1 | Long, warm, dry summer; short transition period with a moderately warm to warm spring and moderately warm to warm autumn; short, mild to moderately cold, dry to very dry winter with a short duration of snow cover. |
+| `T2` | `W2` | Warm 2 | Long, warm, dry summer; very short transition period with a warm to moderately warm spring and moderately warm to warm autumn; short, moderately warm, dry to very dry winter with a very short duration of snow cover. |
+| `T3` | `W3` | Warm 3 | Very long, very warm, dry summer; short transition period with a warm spring and warm autumn; short, mild, dry to very dry winter with a short duration of snow cover. |
+| `T4` | `W4` | Warm 4 | Very long, very warm, very dry summer; very short transition period with a warm spring and warm autumn; short, moderately warm, dry to very dry winter with a very short duration of snow cover. |
+| `T5` | `W5` | Warm 5 | Very long, very warm, very dry summer; very short transition period with a warm spring and warm autumn; very short, warm, dry to very dry winter with a very short duration of snow cover. |
+
+---
+
+## 8. Methodology for Calculating the Climate Unit
+
+### 8.1 Input Data Structure
+
+Annual climate characteristics are stored in a raster collection in the following order:
 
 ```text
-era5l_cz_yindicators
+[year, indicator, y, x]
 ```
 
-This collection is described as annual precomputed climate indicators on the Czech grid, stored as a 4D array `[year, ind, y, x]`. Scenario or model data can use other collections of the same type, provided that they have the same indicator structure.
+Each spatial cell therefore contains eleven values for every year. The application first verifies that the selected period and coordinates fall within the extent of the selected data source [T1].
 
-The spatial grid is defined in the file `rasdaman_registry.json`. The registry contains metadata for collections, time axes, spatial grids, coordinates, and Rasdaman connection settings.
+### 8.2 Multi-year Mean
 
----
-
-## 4. The 11 climate characteristics used
-
-| Index `ind` | Code | Meaning | Unit |
-|---:|---|---|---|
-| 0 | `SUM25` | Annual number of summer days, i.e. days with maximum temperature at least 25 °C | days |
-| 1 | `VEG10` | Annual number of days with mean temperature at least 10 °C | days |
-| 2 | `FROST0` | Annual number of frost days, i.e. days with minimum temperature below 0 °C | days |
-| 3 | `ICE0` | Annual number of ice days, i.e. days with maximum temperature below 0 °C | days |
-| 4 | `T_JAN` | Mean January temperature | °C |
-| 5 | `T_APR` | Mean April temperature | °C |
-| 6 | `T_JUL` | Mean July temperature | °C |
-| 7 | `T_OCT` | Mean October temperature | °C |
-| 8 | `RAIN1` | Annual number of precipitation days with precipitation of at least 1 mm | days |
-| 9 | `P_APR_SEP` | Precipitation total from April to September, i.e. the vegetation period | mm |
-| 10 | `P_OCT_MAR` | Precipitation total from October to March, i.e. the winter period | mm |
-
-The indicator order is important because it corresponds both to the `ind` axis in the Rasdaman collection and to the mapping in `FWF5_quitt_limits_11_rasdaman_index.json`.
-
----
-
-## 5. Overview of the calculation workflow
-
-The full calculation can be summarised in the following steps:
-
-1. **Select the collection and period**  
-   The user provides the Rasdaman collection, start year and end year. The API checks that the requested years are available.
-
-2. **Select the location or area**  
-   The user provides either a point (`lat`, `lon`) or a spatial extent (`bbox`). For grid output, the user may also provide the output-grid spacing `step_lat` and `step_lon`.
-
-3. **Read annual indicators from Rasdaman**  
-   A data block is read from the collection for the selected years, indicators 0 to 10, and the relevant spatial window.
-
-4. **Calculate multi-year averages**  
-   Indicator values are summed across years and divided by the number of years. This creates an array of average indicators for the whole period.
-
-5. **Interpolate to the requested point or custom output grid**  
-   If the output is calculated outside the original cell centres, the 11 indicator values are interpolated using IDW from neighbouring Rasdaman cells.
-
-6. **Compare with the Quitt limit table**  
-   For each of the 23 climate units, the match between each indicator and the interval for that unit is calculated.
-
-7. **Select the best climate unit**  
-   For each unit, the average fuzzy score is calculated. The unit with the highest score is selected. In the case of a tie, the warmer unit is selected.
-
-8. **Create the output**  
-   The result is GeoJSON with point geometry. The properties contain at least `best_unit` and `best_score`; for point calculations, they also contain the averaged values of all 11 indicators. Trend endpoints follow the same GeoJSON structure, but their properties contain trend metrics derived from annual values.
-
----
-
-## 6. Calculation of multi-year averages
-
-Let:
-
-- `i` be the index of the climate characteristic,
-- `y` be the year,
-- `s` be a Rasdaman grid cell,
-- `I_i(y, s)` be the annual value of indicator `i` in year `y` and cell `s`,
-- `Y` be the set of years from `start_year` to `end_year`, inclusive,
-- `n` be the number of years in the selection.
-
-The multi-year average of an indicator is calculated as:
+For the static map, the mean across all years in the selected period is calculated for each indicator `i` and location `s`:
 
 ```text
-mean_i(s) = (1 / n) * sum_{y in Y} I_i(y, s)
+mean_i(s) = (1 / n) × Σ I_i(year, s)
 ```
 
-For efficiency, the code uses a Rasdaman query with `condense + over yr`, which sums the selected years directly on the data-store side. Python then divides the sum by the number of years.
+Both the start year and the end year are included. The calculation therefore does not compare only the first and last year.
 
-The calculation assumes that the Rasdaman collection contains complete coverage for the requested period. If a requested year is missing from the collection, the calculation stops with an error. Numeric missing values are represented as `NaN` and may affect subsequent interpolation or scoring.
+### 8.3 Spatial Interpolation
 
----
-
-## 7. Spatial grid handling
-
-Grid coordinates are loaded using the universal module `grid_coords_universal.py`. The implementation supports two types of grids:
-
-1. **Separable 1D grid**  
-   Longitudes and latitudes can be generated as two separate 1D arrays, typically using `linspace`. An example is the Czech ERA5-Land grid with regular spacing.
-
-2. **Lookup 2D grid**  
-   Latitude and longitude are stored as 2D coordinate layers. This mode is suitable, for example, for rotated regional climate-model grids.
-
-For a point calculation, the nearest grid cell is first found and a candidate window is selected around it. For a grid calculation, the spatial data extent required from Rasdaman is determined from the requested area.
-
----
-
-## 8. IDW interpolation
-
-If the requested point or a point of a custom output grid does not lie exactly at the centre of a Rasdaman cell, the 11 indicator values are interpolated using IDW, i.e. inverse distance weighting.
-
-Let:
-
-- `p` be the requested point,
-- `g_j` be neighbouring Rasdaman points,
-- `d_j` be the distance between `p` and `g_j`, calculated using haversine distance,
-- `p_idw` be the IDW power parameter, with default value `2.0`,
-- `k` be the maximum number of neighbours used, with default value `9`.
-
-The weight of a neighbour is:
+Map output on the native data grid uses the source-cell values directly. For an exact selected point, which will usually not lie at the centre of a cell, **IDW – inverse distance weighting** is used. Nearby data points receive greater weight than more distant points:
 
 ```text
-w_j = 1 / d_j^p_idw
+w_j = 1 / d_j^p
+interpolated_value = Σ(w_j × value_j) / Σ(w_j)
 ```
 
-The interpolated value of an indicator is:
+The default exponent is `p = 2`. At most nine nearest valid points from the local neighbourhood are used. Distance is calculated along the Earth’s surface. If the requested coordinate exactly matches a source point, its value is returned without averaging [T1, T5].
+
+IDW does not increase the actual spatial resolution of the source data. It creates a smooth estimate between the available points.
+
+### 8.4 Partial Similarity to an Interval
+
+Each climate unit contains a lower and upper limit for each indicator. Similarity equals `1` for a value inside the interval. Outside the interval, it decreases linearly to zero:
 
 ```text
-I_hat_i(p) = sum_j(w_j * mean_i(g_j)) / sum_j(w_j)
+μ = 1                                         for lower ≤ value ≤ upper
+μ = max(0, 1 − (lower − value) / tolerance)   for value < lower
+μ = max(0, 1 − (value − upper) / tolerance)   for value > upper
 ```
 
-If the requested point lies exactly at the centre of a grid cell, interpolation is not used and the value of that cell is returned.
+The following tolerance widths are used [T5]:
 
-Default settings:
-
-| Parameter | Meaning | Default value |
+| Group | Characteristics | Tolerance |
 |---|---|---:|
-| `idw_power` | distance-weighting exponent | `2.0` |
-| `idw_k` | maximum number of nearest neighbours for grid calculation | `9` |
-| `idw_radius_px` | radius of the candidate window in pixels | usually `2` in the API |
-| `idw_max_dist_m` | optional maximum neighbour distance in metres | `null` |
-
-The higher the `idw_power`, the more influence the nearest grid cell has. The lower the `idw_power`, the more the result approaches a simple average of neighbouring cells.
-
----
-
-## 9. Quitt climate-unit limit table
-
-Limit values are stored in the file:
-
-```text
-FWF5_quitt_limits_11_rasdaman_index.json
-```
-
-The file contains:
-
-- the source of limits derived from Quitt’s table of climate characteristics,
-- the list of the 11 indicators used,
-- indicator units,
-- the order of climate units from cold to warm,
-- the mapping of indicators to the `ind` axis in the Rasdaman collection,
-- value intervals for each climate unit.
-
-Climate units are evaluated in the following order:
-
-```text
-CH1, CH2, CH3, CH4, CH5, CH6, CH7,
-MT1, MT2, MT3, MT4, MT5, MT6, MT7, MT8, MT9, MT10, MT11,
-T1, T2, T3, T4, T5
-```
-
-This order is also important for resolving ties. Because the code overwrites the previous unit with a later unit if the score is identical, the warmer unit wins in the case of a tie.
-
----
-
-## 10. Fuzzy scoring of climate units
-
-For each climate unit `u` and each indicator `i`, there is an interval:
-
-```text
-[lower_{u,i}, upper_{u,i}]
-```
-
-The indicator value `v` receives a partial score `mu_{u,i}(v)`:
-
-- if `v` lies inside the interval, the score is `1`,
-- if `v` lies below the lower bound, the score decreases linearly according to the distance from the lower bound,
-- if `v` lies above the upper bound, the score decreases linearly according to the distance from the upper bound,
-- if the value is farther away than the tolerance band, the score is `0`.
-
-Formally:
-
-```text
-mu = 1                                      if lower <= v <= upper
-mu = max(0, 1 - (lower - v) / tolerance)    if v < lower
-mu = max(0, 1 - (v - upper) / tolerance)    if v > upper
-```
-
-The tolerances used are:
-
-| Indicator group | Indicators | Tolerance |
-|---|---|---:|
-| Day counts | `SUM25`, `VEG10`, `FROST0`, `ICE0`, `RAIN1` | 10 days |
+| Numbers of days | `SUM25`, `VEG10`, `FROST0`, `ICE0`, `RAIN1` | 10 days |
 | Temperatures | `T_JAN`, `T_APR`, `T_JUL`, `T_OCT` | 1 °C |
 | Precipitation totals | `P_APR_SEP`, `P_OCT_MAR` | 50 mm |
 
-The total score of a unit is the arithmetic mean of partial scores across all available indicators:
+The tolerances are not adopted as a separate parameter from the original Quitt publication; they are part of the Info4forest calculation implementation.
+
+### 8.5 Overall Score and Unit Selection
+
+The overall score of a unit is the arithmetic mean of the partial similarities of all valid indicators:
 
 ```text
-score_u = mean_i(mu_{u,i})
+score(unit) = mean(μ_1, μ_2, …, μ_11)
+best_unit   = unit with the highest score
 ```
 
-The resulting unit is:
-
-```text
-best_unit = argmax_u(score_u)
-```
-
-The value `best_score` is the corresponding maximum score. Interpretation:
-
-| `best_score` | Meaning |
-|---:|---|
-| close to `1.0` | the location matches the intervals of the selected unit very well |
-| approximately `0.5–0.8` | the location partly matches the unit; it may lie near the boundary between multiple units |
-| low score | the result should be interpreted cautiously; the best unit is only the closest one among the available options |
-
-`best_score` is not a statistical probability. It is an algorithmic measure of similarity to the limit intervals.
+If several units have exactly the same result, the unit occurring later in the order from `CH1` to `T5` is preferred, meaning the warmer unit [T5]. This principle is consistent with one of the digital implementations described by UPOL/CHMI, which also preferred the warmer unit when maxima were equal [1, p. 14; PDF p. 15].
 
 ---
 
-## 11. Point calculation
+## 9. Trend Methodology
 
-Point calculation is used for an endpoint such as:
+### 9.1 Why Only the First and Last Year Are Not Used
+
+A difference between two years can be strongly affected by an unusually warm, cold, dry, or wet year. Trends therefore use all valid annual values in the selected period.
+
+### 9.2 Sen’s Slope
+
+For every pair of years, the change in value divided by the time difference is calculated. Sen’s slope is the median of all these pairwise slopes:
 
 ```text
-POST /climaticzones/point
+slope_per_year = median((value_j − value_i) / (year_j − year_i))
+slope_per_decade = 10 × slope_per_year
+estimated_total_change = slope_per_year × (max_year − min_year)
 ```
 
-Typical input:
+The median is less sensitive to individual extreme years than ordinary linear regression [T2].
 
-```json
-{
-  "rasdaman_collection": "era5l_cz_yindicators",
-  "start_year": 1991,
-  "end_year": 2020,
-  "lat": 49.595,
-  "lon": 17.251,
-  "idw_radius_px": 2,
-  "idw_power": 2.0
-}
-```
+### 9.3 Mann–Kendall Test
 
-Workflow:
+The Mann–Kendall test determines whether values exhibit a statistically significant monotonic tendency. The implementation accounts for tied values and uses a normal approximation. The application uses the default level `α = 0.05` [T2].
 
-1. The API checks that the point lies within the spatial extent of the selected collection.
-2. The nearest grid cell is found.
-3. A small surrounding window is read from the Rasdaman collection.
-4. The multi-year average is calculated for each of the 11 characteristics.
-5. If the point does not lie exactly at the cell centre, the values are interpolated using IDW.
-6. The 11 interpolated values are compared with the Quitt limit table.
-7. GeoJSON with a single point is returned.
+- `significant = true`: the trend is statistically significant at the given level;
+- `significant = false`: statistical significance was not established.
 
-A typical output contains:
+Statistical significance alone does not indicate the magnitude or practical impact of a change. `estimated_total_change`, `slope_per_decade`, the length of the period, and the nature of the data source must therefore also be considered.
 
-```json
-{
-  "type": "FeatureCollection",
-  "features": [
-    {
-      "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [17.251, 49.595]
-      },
-      "properties": {
-        "best_unit": "MT7",
-        "best_score": 0.842424,
-        "years": {
-          "start": 1991,
-          "end": 2020,
-          "count": 30
-        },
-        "indicators_avg_11": {
-          "SUM25": 42.1,
-          "VEG10": 166.4,
-          "FROST0": 102.0,
-          "ICE0": 31.6,
-          "T_JAN": -1.2,
-          "T_APR": 8.4,
-          "T_JUL": 18.2,
-          "T_OCT": 8.1,
-          "RAIN1": 105.0,
-          "P_APR_SEP": 420.5,
-          "P_OCT_MAR": 235.8
-        }
-      }
-    }
-  ]
-}
-```
+### 9.4 Climate Unit Trend
 
-The values in the example are illustrative.
+Each climate unit has a rank from the coldest to the warmest. For each year, a continuous expected position on this scale (`expected_fuzzy_rank`) is derived from the fuzzy scores. Sen’s slope is then applied to the annual series of this position [T2].
+
+A positive trend indicates a shift towards warmer units; a negative trend indicates a shift towards colder units. The value may be decimal because it is the trend of a continuous expected position, not the number of discrete colour categories crossed.
+
+### 9.5 Trend of an Individual Characteristic
+
+For maps and details of individual characteristics, the trend is calculated in the physical unit of the variable:
+
+- days per decade for counts of days;
+- °C per decade for temperatures;
+- mm per decade for precipitation totals.
+
+Total change is the trend estimate for the entire period, not the difference between the first and last measured or modelled value.
+
+### 9.6 Worst Adverse Episode
+
+A robust trend line is first constructed using Sen’s slope and a median intercept. For each year, the deviation from this line in a predefined adverse direction is determined. The algorithm searches for continuous sequences of positive adverse deviation and selects the sequence with the greatest total severity [T2].
+
+- `duration` – number of consecutive years;
+- `severity` – sum of adverse deviations;
+- `mean_severity` – mean deviation during the episode;
+- `peak_anomaly` – largest individual adverse deviation.
+
+This diagnostic describes episodes **relative to the long-term trend**, not automatically the worst climate period in absolute terms from the perspective of forest management.
 
 ---
 
-## 12. Area or output-grid calculation
+## 10. Interpretation, Uncertainty, and Limitations
 
-Grid calculation is used for an endpoint such as:
+### 10.1 A Climate Unit Is the Closest Similarity
 
-```text
-POST /climaticzones/grid
-```
+The boundaries of climate units overlap in the original scheme, and according to UPOL/CHMI their numerical limits are only indicative in relation to reality [1, p. 18; PDF p. 19]. The result should therefore not be interpreted as a precise natural boundary.
 
-### 12.1 Native-grid mode
+### 10.2 The Classification Was Developed for Different Historical Conditions
 
-If `step_lat` and `step_lon` are not provided, the calculation works directly with the points of the native Rasdaman grid. An optional `bbox` can be provided to restrict the output to a specific area.
+The original limits are based on climate values from historical Czechoslovakia. When applied to other regions, future scenarios, or values outside the historical range, some profiles may be distant from all units. This will be reflected in a lower match score or values near the ends of the scale.
 
-In this mode:
+### 10.3 Eleven Characteristics Are Used
 
-1. a block of values is read from the Rasdaman collection,
-2. multi-year averages are calculated for each native cell,
-3. fuzzy comparison with the Quitt table is performed for each cell,
-4. the result is GeoJSON with points at the centres of the Rasdaman cells.
+Info4forest does not use all the original characteristics. The result must therefore not be presented as a complete reproduction of the 1971 classification or the UPOL/CHMI map.
 
-### 12.2 Custom output-grid mode
+### 10.4 Map Resolution Is Limited by the Source Data
 
-If `step_lat` and `step_lon` are provided, the API creates a custom regular output grid in geographic coordinates. Both parameters must be provided together.
+Smooth rendering and IDW may appear more detailed than the actual model resolution. For example, a source with an approximate resolution of 10 × 10 km cannot reliably describe the microclimate of a slope, valley, or forest stand at the scale of individual hectares.
 
-Typical input:
+### 10.5 Model Sources Include Uncertainty
 
-```json
-{
-  "rasdaman_collection": "era5l_cz_yindicators",
-  "start_year": 1991,
-  "end_year": 2020,
-  "bbox": {
-    "start_lat": 48.6,
-    "end_lat": 51.0,
-    "start_lon": 12.2,
-    "end_lon": 18.8
-  },
-  "step_lat": 0.05,
-  "step_lon": 0.05,
-  "idw_power": 2.0,
-  "idw_k": 9,
-  "idw_radius_px": 2
-}
-```
+Future climate data depend on the global model, regional model, scenario, and natural climate variability. For decision-making, it is advisable to compare multiple sources and periods and, where appropriate, other expert evidence.
 
-In this mode:
+### 10.6 Climate Unit Trend Is a Derived Quantity
 
-1. a list of target coordinates is created from `bbox`, `step_lat` and `step_lon`,
-2. an expanded surrounding area required for IDW is read from the Rasdaman collection,
-3. multi-year averages are calculated in native cells,
-4. the 11 indicators are interpolated by IDW for each target point,
-5. fuzzy classification is performed for each target point,
-6. the result is GeoJSON with points on the custom output grid.
+A unit combines several characteristics. The same shift on its trend scale may be caused by different combinations of temperature and precipitation changes at different locations. For substantive interpretation, the trends of the individual characteristics should therefore also be examined.
+
+### 10.7 Appropriate and Inappropriate Uses
+
+The outputs are particularly suitable for:
+
+- an indicative description of the climate type of an area;
+- comparison of periods, locations, or climate data sources;
+- screening of long-term changes relevant to forest planning;
+- identifying areas suitable for more detailed analysis.
+
+The outputs alone are not a substitute for:
+
+- local measurements and microclimate assessment;
+- dendrological, soil, hydrological, or site assessment;
+- operational weather forecasting;
+- an unequivocal basis for major decisions without further expert interpretation.
 
 ---
 
-## 13. Trend calculations
+## 11. The API as the Data and Calculation Backend
 
-Trend calculations are separate from the static multi-year climate-zone calculation. They are used when the user wants to describe how a climate characteristic or a climate zone changes over time within the selected period.
+The Info4forest application obtains its source catalogue, map data, point characteristics, and trend diagnostics through the FWF5 Climate API. General users do not need to use the API directly, but its publication supports transparency, reproducibility, and integration of the results into other systems.
 
-The key difference is that trend endpoints use the annual time series for all years from `start_year` to `end_year`, inclusive. The trend is not derived only from the first and last year, because individual years may be anomalously warm, cold, dry or wet.
+The API also provides more detailed functions than must always be visible simultaneously in the main interface, including:
 
-For each requested point or output-grid point, the workflow is:
+- a complete catalogue of climate data sources and locations;
+- metadata for climate characteristics and units;
+- annual series of all eleven characteristics for a specific point;
+- separate map and point trend outputs;
+- technical information about the temporal and spatial extents of data collections;
+- richer diagnostic information on trends, series quality, and shifts over periods of different lengths.
 
-1. read annual values of the 11 indicators for all requested years,
-2. interpolate annual values to the requested point using the same IDW logic as other endpoints,
-3. derive the annual trend variable, depending on the endpoint and selected metric,
-4. estimate the trend using Sen’s slope,
-5. return the trend as GeoJSON feature properties.
+The current technical API documentation is available at:
 
-The trend method is identified in the output as:
+**<https://app.swaggerhub.com/apis/JIRKAVALES_1/Info4forest/1.0.0>**
 
-```text
-sen_slope_yearly
-```
+Examples of endpoints used as the application’s backend:
 
-At least two valid years are required for trend calculation.
+- `/climaticsourcecatalog` – climate data sources and their lay and technical names;
+- `/climaticsourcecatalog/locations` – locations and data extents;
+- `/climaticzones/grid` and `/climaticzones/point` – climate units;
+- `/climaticzones/trend/grid` and `/climaticzones/trend/point` – climate-unit trends;
+- `/climatecharacteristics/{characteristic}/grid` – maps of individual characteristics;
+- `/climatecharacteristics/trend/{characteristic}/point` – trend of a characteristic at a point.
 
-### 13.1 Sen’s slope
+These names are included only to make the technical backend traceable; the main purpose of this document is the substantive interpretation of the visualisation and methodology.
 
-Sen’s slope is a robust non-parametric trend estimate. For all valid year pairs `(a, b)`, where `b > a`, the slope is calculated as:
+---
 
-```text
-slope_ab = (value_b - value_a) / (year_b - year_a)
-```
+## 12. Recommended Citation
 
-The final slope is the median of all pairwise slopes:
+When citing a map or result, it is advisable to state:
 
-```text
-slope_per_year = median(slope_ab)
-```
+1. the application and workflow: **Info4forest, WF5 – Forest-related Climate Area Map**;
+2. the climate data source/model and scenario;
+3. the location and selected period;
+4. the date on which the result was created or downloaded;
+5. a link to this methodology;
+6. the specialist methodological source [1] and, where appropriate, the original Quitt work [2].
 
-The API also reports:
+Example:
 
-```text
-slope_per_decade = 10 * slope_per_year
-estimated_total_change = slope_per_year * (end_year - start_year)
-```
+> Info4forest (2026): WF5 – Forest-related Climate Area Map, ERA5-Land climate data source, Czechia, 1991–2020. Climate units inspired by the Quitt classification; methodology according to Květoň and Voženílek (2011) and the Info4forest implementation.
 
-This approach reduces the influence of individual anomalous years compared with a simple first-year/last-year difference.
+---
 
-The output may also contain:
+## 13. Sources
 
-| Field | Meaning |
-|---|---|
-| `valid_years` | number of years with valid values used for the trend |
-| `pair_count` | number of valid year pairs used for Sen’s slope |
-| `sign_consistency` | share of non-zero year-pair slopes with the dominant sign |
-| `direction` | qualitative trend direction, based on `slope_per_decade` and a threshold |
-| `strength` | qualitative strength class derived from the absolute slope |
+### Specialist and Methodological Sources
 
-The field `sign_consistency` is not a formal significance test. It is a simple diagnostic indicating whether most pairwise year-to-year slopes point in the same direction.
+**[1]** KVĚTOŇ, Vít; VOŽENÍLEK, Vít. *Klimatické oblasti Česka: klasifikace podle Quitta za období 1961–2000 / Climatic Regions of Czechia: Quitt's Classification during Years 1961–2000*. Olomouc: Palacký University Olomouc, co-published with the Czech Hydrometeorological Institute, 2011. M.A.P.S., Num. 3. ISBN 978-80-244-2813-0; ISBN 978-80-86690-89-6.
 
-### 13.2 Trends of individual climate characteristics
+**[2]** QUITT, Evžen. *Klimatické oblasti Československa* [Climate Areas of Czechoslovakia]. Studia Geographica, Vol. 16. Brno: Institute of Geography, Czechoslovak Academy of Sciences, 1971, 73 pp. Bibliographic information according to [1, p. 19; PDF p. 20].
 
-Climate-characteristic trend endpoints calculate the trend for one selected indicator only. They do not calculate climate-zone trends and they do not return all 11 indicators together.
+### Technical Implementation Sources
 
-Typical endpoint pattern:
+**[T1]** `FWF5_API.py` – API layer, input validation, catalogue, calculation orchestration, and response format.  
+**[T2]** `FWF5_trends.py` – Sen’s slope, Mann–Kendall test, climate-unit trends, and adverse episodes.  
+**[T3]** `FWF5_climate_metadata.json` – Czech and English names, codes, and verbal descriptions of climate units and characteristics.  
+**[T4]** `climate_source_catalog.json` – catalogue of climate data sources and locations, lay and technical names, and Rasdaman collection names.  
+**[T5]** `FWF5_quitt_limits_11_rasdaman_index.json`, `FWF5_quitt_fuzzy_match_point.py`, and `FWF5_quitt_fuzzy_match_area_custom_grid.py` – limit intervals, fuzzy scoring, IDW, and the order of climate units.  
+**[T6]** OpenAPI documentation for the FWF5 Climate API: <https://app.swaggerhub.com/apis/JIRKAVALES_1/Info4forest/1.0.0>.
 
-```text
-POST /climatecharacteristics/trend/<characteristic>/point
-POST /climatecharacteristics/trend/<characteristic>/grid
-```
+---
 
-where `<characteristic>` can be:
+## 14. Appendix A – Limit Intervals Used by the Implementation
 
-```text
-sum25, veg10, frost0, ice0,
-t_jan, t_apr, t_jul, t_oct,
-rain1, p_apr_sep, p_oct_mar
-```
+The following table gives the exact intervals of the eleven characteristics used by the current implementation [T5]. Units: counts of days in days, temperatures in °C, and precipitation totals in mm.
 
-For example:
+| Unit | SUM25 | VEG10 | FROST0 | ICE0 | T_JAN | T_APR | T_JUL | T_OCT | RAIN1 | P_APR_SEP | P_OCT_MAR |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `CH1` | 0–10 | 0–80 | 160–180 | 60–80 | -8–-7 | 0–2 | 10–12 | 2–4 | 140–160 | 900–1000 | 600–700 |
+| `CH2` | 0–10 | 0–80 | 160–180 | 60–70 | -8–-7 | 0–2 | 10–12 | 2–4 | 140–160 | 700–900 | 500–600 |
+| `CH3` | 0–20 | 80–120 | 160–180 | 60–70 | -8–-7 | 0–2 | 12–14 | 2–4 | 120–140 | 600–700 | 400–500 |
+| `CH4` | 0–20 | 80–120 | 160–180 | 60–70 | -7–-6 | 2–4 | 12–14 | 4–5 | 120–140 | 600–700 | 400–500 |
+| `CH5` | 10–30 | 100–120 | 140–160 | 60–70 | -6–-5 | 2–4 | 14–15 | 5–6 | 120–140 | 500–600 | 350–400 |
+| `CH6` | 10–30 | 120–140 | 140–160 | 60–70 | -5–-4 | 2–4 | 14–15 | 5–6 | 140–160 | 600–700 | 400–500 |
+| `CH7` | 10–30 | 120–140 | 140–160 | 50–60 | -4–-3 | 4–6 | 15–16 | 6–7 | 120–130 | 500–600 | 350–400 |
+| `MT1` | 20–30 | 120–140 | 160–180 | 40–50 | -6–-5 | 5–6 | 15–16 | 6–7 | 120–130 | 500–600 | 300–350 |
+| `MT2` | 20–30 | 140–160 | 110–130 | 40–50 | -4–-3 | 6–7 | 16–17 | 6–7 | 120–130 | 450–500 | 250–300 |
+| `MT3` | 20–30 | 120–140 | 130–160 | 40–50 | -4–-3 | 6–7 | 16–17 | 6–7 | 110–120 | 350–450 | 250–300 |
+| `MT4` | 20–30 | 140–160 | 110–130 | 40–50 | -3–-2 | 6–7 | 16–17 | 6–7 | 110–120 | 350–450 | 250–300 |
+| `MT5` | 30–40 | 140–160 | 130–140 | 40–50 | -5–-4 | 6–7 | 16–17 | 6–7 | 100–120 | 350–450 | 250–300 |
+| `MT6` | 30–40 | 140–160 | 140–160 | 40–50 | -6–-5 | 6–7 | 16–17 | 6–7 | 100–120 | 450–500 | 250–300 |
+| `MT7` | 30–40 | 140–160 | 110–130 | 40–50 | -3–-2 | 6–7 | 16–17 | 7–8 | 100–120 | 400–450 | 250–300 |
+| `MT8` | 40–50 | 140–160 | 130–140 | 40–50 | -5–-4 | 7–8 | 17–18 | 7–8 | 100–120 | 400–450 | 250–300 |
+| `MT9` | 40–50 | 140–160 | 110–130 | 30–40 | -4–-3 | 6–7 | 17–18 | 7–8 | 100–120 | 400–450 | 250–300 |
+| `MT10` | 40–50 | 140–160 | 110–130 | 30–40 | -3–-2 | 7–8 | 17–18 | 7–8 | 100–120 | 400–450 | 200–250 |
+| `MT11` | 40–50 | 140–160 | 110–130 | 30–40 | -3–-2 | 7–8 | 17–18 | 7–8 | 90–100 | 350–400 | 200–250 |
+| `T1` | 50–60 | 160–170 | 120–130 | 30–40 | -5–-3 | 7–8 | 17–19 | 7–9 | 90–100 | 350–400 | 200–300 |
+| `T2` | 50–60 | 160–170 | 100–110 | 30–40 | -3–-2 | 8–9 | 18–19 | 7–9 | 90–100 | 350–400 | 200–300 |
+| `T3` | 60–70 | 170–180 | 110–120 | 30–40 | -4–-3 | 8–10 | 19–20 | 8–9 | 90–100 | 350–400 | 200–300 |
+| `T4` | 60–70 | 170–180 | 100–110 | 30–40 | -3–-2 | 9–10 | 19–20 | 9–10 | 80–90 | 300–350 | 200–300 |
+| `T5` | 60–70 | ≥ 180 | 90–100 | ≤ 30 | -2–-1 | 9–10 | 19–20 | 9–10 | 80–90 | 300–350 | 200–300 |
 
-```text
-POST /climatecharacteristics/trend/t_jul/point
-POST /climatecharacteristics/trend/p_apr_sep/grid
-```
+### Note on Using the Table
 
-The annual value of the selected indicator is used directly as the trend variable. The resulting slope therefore has the physical unit of the indicator, for example:
-
-- days per decade for `SUM25`, `VEG10`, `FROST0`, `ICE0` and `RAIN1`,
-- °C per decade for `T_JAN`, `T_APR`, `T_JUL` and `T_OCT`,
-- mm per decade for `P_APR_SEP` and `P_OCT_MAR`.
-
-A typical trend object for a single indicator is:
-
-```json
-{
-  "method": "sen_slope_yearly",
-  "characteristic": "T_JUL",
-  "unit": "°C",
-  "slope_per_year": 0.043,
-  "slope_per_decade": 0.43,
-  "estimated_total_change": 1.29,
-  "direction": "increase",
-  "valid_years": 30,
-  "pair_count": 435,
-  "sign_consistency": 0.71
-}
-```
-
-The direction is `increase`, `decrease`, `stable` or `unknown`, depending on the slope and the selected `trend_threshold_per_decade`.
-
-### 13.3 Trends of climate zones
-
-Climate-zone trend endpoints calculate a trend from the annual 11-indicator vectors. They are separate from individual indicator trends.
-
-Endpoint pattern:
-
-```text
-POST /climaticzones/trend/point
-POST /climaticzones/trend/grid
-```
-
-The request can select the trend metric using:
-
-```json
-{
-  "trend_metric": "expected"
-}
-```
-
-or:
-
-```json
-{
-  "trend_metric": "exceedance"
-}
-```
-
-The accepted metric names are:
-
-```text
-expected, expected_fuzzy_rank,
-exceedance, exceedance_rank_equivalent
-```
-
-For every year, the 11 annual indicators are first interpolated to the requested point or output-grid point. The selected climate-zone trend metric is then calculated for each year. Sen’s slope is then estimated from the annual metric values.
-
-#### 13.3.1 `expected_fuzzy_rank`
-
-The `expected_fuzzy_rank` metric expresses the annual climate-zone position as a continuous value on the ordered Quitt scale.
-
-The climate units are ordered from cold to warm:
-
-```text
-CH1, CH2, ..., CH7, MT1, ..., MT11, T1, ..., T5
-```
-
-They are assigned ranks:
-
-```text
-CH1 = 0
-...
-T5 = 22
-```
-
-For a given year, the calculation first computes fuzzy scores for all climate units. Instead of using only the winning unit, it calculates a weighted average rank:
-
-```text
-expected_rank = sum_u(rank_u * score_u) / sum_u(score_u)
-```
-
-This value is more stable than a hard annual class such as `MT7` or `MT8`, especially near zone boundaries.
-
-The trend output then describes movement along the official Quitt scale:
-
-- positive `slope_per_decade` means a shift toward warmer climate units,
-- negative `slope_per_decade` means a shift toward colder climate units,
-- values near zero indicate a stable position on the scale.
-
-A typical output fragment is:
-
-```json
-{
-  "method": "sen_slope_yearly",
-  "metric": "expected_fuzzy_rank",
-  "slope_per_decade": 0.72,
-  "slope_unit": "climate_zone_rank_per_decade",
-  "estimated_total_change": 2.16,
-  "direction": "warmer",
-  "strength": "moderate"
-}
-```
-
-This example means that, over the selected period, the location moves toward warmer Quitt units by about 0.72 rank units per decade.
-
-#### 13.3.2 `exceedance_rank_equivalent`
-
-The `exceedance_rank_equivalent` metric is designed for situations where the official Quitt scale reaches its edge. The warm edge of the scale is `T5`; the cold edge is `CH1`. If a location is already classified near `T5`, it can continue to warm even though no official warmer Quitt unit exists. Similarly, a location could theoretically move beyond the cold edge near `CH1`.
-
-This metric therefore measures how far the annual indicator values exceed the official Quitt scale at either edge and expresses that exceedance as a synthetic rank-equivalent value.
-
-For each indicator, the algorithm determines whether increasing or decreasing values represent movement toward warmer zones. Examples:
-
-- for `SUM25`, `VEG10`, `T_JAN`, `T_APR`, `T_JUL` and `T_OCT`, increasing values generally move toward warmer zones,
-- for `FROST0` and `ICE0`, decreasing values generally move toward warmer zones,
-- precipitation indicators are handled according to their position in the cold-to-warm Quitt limit table, not by a fixed hard-coded assumption.
-
-For every indicator and year, the method derives:
-
-- a cold-edge threshold from `CH1`,
-- a warm-edge threshold from `T5`,
-- a typical one-rank step size from neighbouring climate units,
-- a normalized exceedance beyond the warm edge,
-- a normalized exceedance beyond the cold edge.
-
-The annual metric is calculated as a signed value:
-
-```text
-signed_exceedance = mean(warm_edge_exceedance) - mean(cold_edge_exceedance)
-```
-
-Interpretation:
-
-| Value | Meaning |
-|---:|---|
-| positive | the annual values exceed the warm edge of the official scale more than the cold edge |
-| negative | the annual values exceed the cold edge of the official scale more than the warm edge |
-| close to 0 | values are inside the official scale or exceed both edges only weakly |
-
-Sen’s slope is then calculated from the annual signed exceedance values.
-
-A typical output fragment is:
-
-```json
-{
-  "method": "sen_slope_yearly",
-  "metric": "exceedance_rank_equivalent",
-  "slope_per_decade": 0.67,
-  "slope_unit": "climate_zone_rank_equivalent_per_decade",
-  "estimated_total_change": 2.0,
-  "direction": "beyond_warm_edge_increase",
-  "strength": "strong",
-  "scale": {
-    "reference_cold_zone": "CH1",
-    "reference_warm_zone": "T5",
-    "is_beyond_official_quitt_scale_metric": true
-  }
-}
-```
-
-This does **not** mean that a new official Quitt unit such as `T7` exists. It means that the trend corresponds to approximately two synthetic rank-equivalent units beyond the warm edge of the official scale.
-
-The same logic also works in the opposite direction. A negative trend may indicate increasing exceedance beyond the cold edge of the official scale.
-
-### 13.4 Optional annual series in trend output
-
-Trend endpoints may optionally include annual values used for the trend calculation. This is controlled by:
-
-```json
-{
-  "include_yearly_series": true
-}
-```
-
-For large grid outputs this can substantially increase the response size. For map layers, it is usually preferable to keep `include_yearly_series` set to `false` and map only the final trend fields.
-
-## 14. Difference between climate-zone endpoints and climate-characteristic endpoints
-
-The API distinguishes several groups of outputs:
-
-1. **Climate characteristics – multi-year values**  
-   These return indicator values themselves, for example the average number of summer days or precipitation totals. Area endpoints can return either all 11 indicators together or one selected indicator.
-
-2. **Climate characteristics – trends**  
-   These return the Sen-slope trend of one selected annual indicator, for a point or output grid.
-
-3. **Climate zones – static classification**  
-   These return the result of comparing the 11 multi-year averaged characteristics with the Quitt limit table, i.e. `best_unit` and `best_score`.
-
-4. **Climate zones – trends**  
-   These return a trend derived from annual 11-indicator vectors, using either `expected_fuzzy_rank` or `exceedance_rank_equivalent`.
-
-Climate zones are therefore derived outputs built on top of climate characteristics. Climate-zone trends are derived from annual climate-characteristic values, not from a single multi-year average.
-
-## 15. Checks and validation rules
-
-The implementation performs, in particular, the following checks:
-
-- existence and readability of the Rasdaman registry,
-- existence of the selected Rasdaman collection in the registry,
-- correct collection structure `[year, ind, y, x]`,
-- indicator-axis range `0:10`,
-- availability of the requested years,
-- at least two years for trend endpoints,
-- spatial extent of the point or `bbox`,
-- numeric validity of parameters `lat`, `lon`, `step_lat`, `step_lon`, `idw_power`, `idw_k`, `idw_radius_px`, `trend_threshold_per_decade` and related optional parameters,
-- existence and readability of the Quitt limit table.
-
-If the requested temporal or spatial extent lies outside the data, the API returns a validation error instead of silently clipping the result.
-
-## 16. Limitations and interpretation of results
-
-The results should be interpreted with the following limitations in mind:
-
-1. **Only 11 of the original Quitt characteristics are used**  
-   The original Quitt scheme works with a broader set of characteristics. This implementation uses the 11 characteristics available in the data and computation pipeline.
-
-2. **Algorithmic classification, not a manually generalised map**  
-   The output is the result of a repeatable calculation over gridded data. It may differ from the published cartographic map, which may include generalisation, expert interpretation, or different weighting of groups of variables.
-
-3. **The fuzzy score is not a probability**  
-   `best_score` expresses similarity to intervals, not the probability of occurrence of a climate unit.
-
-4. **Results near zone boundaries are more sensitive**  
-   If a location lies on a transition between climate units, small changes in period, dataset, or interpolation can change the resulting unit code. Trend metric `expected_fuzzy_rank` reduces, but does not completely remove, this sensitivity.
-
-5. **The result depends on the selected data collection and period**  
-   The same location may be classified differently for historical data, reanalysis, or a climate scenario.
-
-6. **Precipitation and temperature indicators have different spatial uncertainties**  
-   Some variables, especially precipitation and characteristics related to snow cover or cloudiness, are usually more spatially uncertain than temperature characteristics. Because this implementation omits some characteristics, it should not be treated as a full reconstruction of the original Quitt classification.
-
-7. **Trend direction is not automatically an impact assessment**  
-   A warmer or drier trend may be interpreted as adverse in many climate-risk applications, but the API trend metrics themselves are descriptive. Terms such as `warmer`, `cooler`, `increase`, `decrease`, `beyond_warm_edge_increase` and `beyond_cold_edge_increase` describe the direction of change, not a universal value judgement.
-
-8. **Exceedance is a synthetic metric beyond the official scale**  
-   `exceedance_rank_equivalent` is useful for avoiding edge saturation at `T5` or `CH1`, but it does not define new official Quitt units.
-
-## 17. Recommended way to cite this methodology in the API
-
-In an OpenAPI specification, this methodology can be linked as follows:
-
-```yaml
-externalDocs:
-  description: Methodology for calculating climate zones according to Quitt’s classification
-  url: https://<namespace>.gitlab.io/<project>/methodology_climate_zones_quitt/
-```
-
-For a specific endpoint:
-
-```yaml
-paths:
-  /climaticzones/grid:
-    post:
-      summary: Calculate climate zones for an area or grid
-      externalDocs:
-        description: Detailed climate-zone calculation methodology
-        url: https://<namespace>.gitlab.io/<project>/methodology_climate_zones_quitt/
-```
-
-The same methodology should also be linked from trend endpoints such as `/climaticzones/trend/grid`, because those endpoints use the same indicator set, IDW interpolation and Quitt limit table.
-
-If the document is not published through GitLab Pages and is only stored in the repository, it is possible to link directly to the Markdown file in GitLab. For a public API, however, a readable HTML version published through GitLab Pages is preferable.
-
-## 18. Implementation-related files
-
-| File | Role in the calculation |
-|---|---|
-| `FWF5_API.py` | Flask API and public endpoints |
-| `FWF5_trends.py` | trend calculations for climate characteristics and climate zones |
-| `rasdaman_registry.json` | registry of Rasdaman collections, time axes, grids and coordinates |
-| `FWF5_quitt_limits_11_rasdaman_index.json` | Quitt unit limit table for the 11 indicators |
-| `FWF5_climate_metadata.json` | descriptions of climate characteristics and zones |
-| `FWF5_quitt_fuzzy_match_point.py` | point calculation of the climate unit |
-| `FWF5_quitt_fuzzy_match_area_custom_grid.py` | climate-unit calculation for the native or custom grid |
-| `FWF5_yindicators_custom_grid_means.py` | export of multi-year averages of the 11 climate characteristics |
-| `FWF5_yindicators_yearly_point.py` | export of annual values of the 11 climate characteristics for a point |
-| `grid_coords_universal.py` | grid-coordinate handling, spatial subsets and IDW interpolation |
-
-## 19. Reproducibility
-
-To make the result reproducible, published outputs should specify:
-
-- the name of the Rasdaman collection used,
-- the version of the Rasdaman registry,
-- the version of the Quitt interval limit table,
-- the start and end year,
-- the spatial extent used,
-- whether the calculation was performed on the native or custom grid,
-- the values of `idw_power`, `idw_k`, `idw_radius_px` and, if used, `idw_max_dist_m`,
-- for trend outputs, the trend method and metric, for example `sen_slope_yearly` and `expected_fuzzy_rank`,
-- the value of `trend_threshold_per_decade`, if a non-default threshold is used,
-- whether annual series were included in the output,
-- the API version or repository commit.
-
-Recommended minimum metadata record for static climate-zone calculation:
-
-```json
-{
-  "method": "quitt_fuzzy_match_11_indicators",
-  "rasdaman_collection": "era5l_cz_yindicators",
-  "start_year": 1991,
-  "end_year": 2020,
-  "quitt_limits": "FWF5_quitt_limits_11_rasdaman_index.json",
-  "idw": {
-    "power": 2.0,
-    "k_nearest": 9,
-    "radius_px": 2,
-    "max_dist_m": null
-  },
-  "output": "GeoJSON FeatureCollection"
-}
-```
-
-Recommended minimum metadata record for climate-zone trend calculation:
-
-```json
-{
-  "method": "sen_slope_yearly",
-  "trend_metric": "expected_fuzzy_rank",
-  "rasdaman_collection": "era5l_cz_yindicators",
-  "start_year": 1991,
-  "end_year": 2020,
-  "quitt_limits": "FWF5_quitt_limits_11_rasdaman_index.json",
-  "idw": {
-    "power": 2.0,
-    "k_nearest": 9,
-    "radius_px": 2,
-    "max_dist_m": null
-  },
-  "trend_threshold_per_decade": 0.25,
-  "include_yearly_series": false,
-  "output": "GeoJSON FeatureCollection"
-}
-```
-
-For exceedance-based climate-zone trend, set:
-
-```json
-{
-  "trend_metric": "exceedance_rank_equivalent"
-}
-```
-
-## 20. One-sentence methodology summary
-
-A static climate zone is determined by calculating or interpolating 11 multi-year climate characteristics for a selected location and period, comparing them with the intervals of 23 Quitt climate units, and selecting the unit with the highest fuzzy similarity score; trend endpoints use annual values for all years in the selected period and estimate Sen-slope trends either for individual indicators or for climate-zone metrics such as `expected_fuzzy_rank` and `exceedance_rank_equivalent`.
+The intervals should not be used in isolation as a simple decision tree. The implementation evaluates all eleven characteristics jointly and uses a smoothly decreasing fuzzy similarity outside the intervals. UPOL/CHMI also notes that the original numerical limits are indicative and that different implementations of the classification may produce different maps [1, p. 18; PDF p. 19].

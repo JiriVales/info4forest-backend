@@ -1,849 +1,549 @@
-# Metodika výpočtu klimatických zón inspirovaných Quittovou klasifikací
+# Info4forest WF5: klimatické oblasti inspirované Quittovou klasifikací
 
-**Účel dokumentu:** metodický popis výpočtu klimatických zón používaný v API. Dokument je určen k publikaci v GitLabu/GitLab Pages a k odkázání z OpenAPI/Swagger dokumentace pomocí `externalDocs`.
+## Popis vizualizace a metodika výpočtu
 
-**Verze dokumentu:** 1.1  
-**Datum:** 2026-06-04  
-**Metodický základ:** E. Quittova klimatická klasifikace a metodika popsaná v publikaci *Klimatické oblasti Česka: klasifikace podle Quitta za období 1961–2000* vydané Univerzitou Palackého v Olomouci a ČHMÚ.  
-**Odkaz na publikaci:** <https://www.cartography.upol.cz/MAPS/MAPS_Num3_brozura.pdf>
+**Verze dokumentu:** 3.0  
+**Datum revize:** 2026-07-19  
+**Určení dokumentu:** věcný popis workflow WF5 v aplikaci Info4forest, vysvětlení zobrazovaných výsledků a transparentní metodika jejich výpočtu.  
+**Metodický základ:** Quittova klasifikace klimatu a její rozbor v publikaci Univerzity Palackého v Olomouci a Českého hydrometeorologického ústavu [1].  
 
----
-
-## 1. Stručné vysvětlení pro laiky
-
-Výpočet klimatické zóny funguje podobně, jako kdybychom pro každé místo vyplnili klimatický dotazník a pak hledali, ke které známé klimatické oblasti se místo nejvíce podobá.
-
-Pro každé místo a zvolené období, například 1991–2020, se nejprve vezme 11 klimatických charakteristik. Patří mezi ně například počet letních dnů, počet mrazových dnů, průměrná teplota v lednu, dubnu, červenci a říjnu nebo množství srážek ve vegetačním a zimním období. Tyto charakteristiky popisují, jestli je místo spíše teplé nebo chladné, suché nebo vlhké a jak výrazná je zima a léto.
-
-Potom se pro každou charakteristiku spočítá průměr za celé vybrané období. Pokud uživatel zadá konkrétní bod, který neleží přesně ve středu datové buňky, hodnoty se dopočítají z okolních buněk metodou IDW, tedy váženým průměrem, kde bližší buňky mají větší váhu než vzdálenější.
-
-Následně se výsledných 11 hodnot porovná s tabulkou Quittových klimatických jednotek. Quittova klasifikace rozlišuje klimatické jednotky typu `CH1` až `CH7` pro chladnou oblast, `MT1` až `MT11` pro mírně teplou oblast a `T1` až `T5` pro teplou oblast. Každá jednotka má předepsané intervaly hodnot, například kolik má mít letních dnů nebo jaká má být průměrná červencová teplota.
-
-Protože reálná data málokdy přesně zapadnou do jedné jediné jednotky, výpočet nepoužívá pouze tvrdé pravidlo „spadá / nespadá“. Místo toho používá podobnostní skóre od 0 do 1. Hodnota 1 znamená, že daná charakteristika leží přesně v intervalu dané klimatické jednotky. Pokud je hodnota těsně mimo interval, dostane částečné skóre. Pokud je příliš daleko, dostane skóre 0. Celkové skóre klimatické jednotky je průměr skóre přes všech 11 charakteristik.
-
-Výsledná klimatická zóna je ta jednotka, která dosáhne nejvyššího skóre. Pokud dvě jednotky vyjdou stejně dobře, výpočet upřednostní teplejší jednotku. To odpovídá principu popsanému v metodice UPOL u digitálního přiřazování podle maxima splněných kritérií.
-
-Výstupem API je GeoJSON. U každého bodu je uveden kód nejlepší klimatické jednotky, například `MT7`, a hodnota `best_score`, která říká, jak dobře dané místo odpovídá vybrané jednotce. Skóre není pravděpodobnost, ale míra podobnosti k intervalům Quittovy tabulky.
-
-
-Kromě statického výpočtu klimatické zóny pro zvolené víceleté období API podporuje také trendové výpočty. Trendové endpointy neporovnávají pouze první a poslední rok. Pracují s ročními hodnotami všech let ve zvoleném období a odhadují robustní Senovu směrnici. Výsledek je proto méně citlivý na jednotlivé anomální roky. Trendy lze počítat buď pro jednotlivé klimatické charakteristiky, například červencovou teplotu nebo srážky ve vegetačním období, nebo pro klimatické zóny. Trend klimatických zón podporuje dvě metriky: `expected_fuzzy_rank` a `exceedance_rank_equivalent`.
+> Tento dokument není návodem k ovládání jednotlivých tlačítek ani příručkou k API endpointům. Vysvětluje především, **co aplikace Info4forest ve workflow WF5 zobrazuje, co výsledky znamenají, z jakých dat vycházejí a jak jsou vypočteny**.
 
 ---
 
-## 2. Vztah k Quittově a UPOL metodice
+## Obsah
 
-Quittova klimatická klasifikace je klasifikací komplexní klimatologie. Území se nezařazuje podle jedné veličiny, například jen podle průměrné teploty, ale podle kombinace více klimatologických charakteristik. Původní Quittovo schéma pracuje s 23 klimatickými jednotkami ve třech základních oblastech:
-
-- **CH** – chladná oblast (`CH1` až `CH7`),
-- **MT** – mírně teplá oblast (`MT1` až `MT11`),
-- **T** – teplá oblast (`T1` až `T5`).
-
-Původní Quittova klasifikace podle publikace UPOL/ČHMÚ rozlišuje 23 jednotek definovaných kombinacemi hodnot 14 klimatologických charakteristik. Hranice jednotek jsou dány změnami těchto charakteristik a jednotlivé intervaly se mohou částečně překrývat. Publikace UPOL upozorňuje, že praktická realizace klasifikace je zatížena neurčitostí, protože jedno místo může splňovat znaky více jednotek současně.
-
-Tato implementace je **inspirována Quittovou klasifikací a metodikou UPOL**, ale není přímou reprodukcí původní mapy ani ruční kartografické interpretace. Výpočet je algoritmický, opakovatelný a založený na předpočtených klimatických indikátorech v rastru. Oproti původním 14 charakteristikám používá implementace 11 dostupných charakteristik. Metadata limitní tabulky uvádějí jako nepoužité charakteristiky kódy `PDZAT`, `PDJAS`, `PDSCE` a `PDOBL`.
-
-Hlavní rozdíl oproti jednoduché metodě „maximum splněných kritérií“ je ten, že tato implementace používá fuzzy skórování. Místo aby každá charakteristika dala pouze hodnotu 0 nebo 1, hodnota těsně mimo interval dostane částečnou shodu. Tím je výpočet stabilnější v případech, kdy se hodnoty nacházejí blízko hranice klimatických jednotek.
+1. Co je workflow WF5
+2. Co aplikace zobrazuje
+3. Jak číst hlavní výsledky
+4. Klimatické zdroje a sledované lokality
+5. Vztah k Quittově klasifikaci
+6. Jedenáct použitých klimatických charakteristik
+7. Přehled klimatických oblastí a jednotek
+8. Metodika výpočtu klimatické jednotky
+9. Metodika trendů
+10. Interpretace, nejistoty a omezení
+11. API jako datové a výpočetní zázemí
+12. Doporučené citování
+13. Zdroje
+14. Příloha A – limitní intervaly používané implementací
 
 ---
 
-## 3. Vstupní data
+## 1. Co je workflow WF5
 
-Výpočet pracuje s předpočtenou rasdaman kolekcí ročních klimatických indikátorů. Kolekce má čtyři dimenze:
+Workflow **WF5 – Forest-related Climate Area Map** v aplikaci Info4forest převádí klimatická data do srozumitelné mapy klimatických oblastí a souvisejících charakteristik. Uživatel zvolí klimatický zdroj, lokalitu a období. Aplikace následně ukáže, kterému typu klimatu se jednotlivá místa v daném období nejvíce podobají.
+
+Výsledek není založen pouze na jedné veličině, například na průměrné teplotě. Pro každé místo se společně vyhodnocuje jedenáct teplotních a srážkových charakteristik. Patří mezi ně počet letních, mrazových a ledových dnů, teploty ve čtyřech reprezentativních měsících, počet srážkových dnů a sezónní srážkové úhrny.
+
+Zjednodušeně lze výpočet chápat jako **porovnání klimatického profilu místa s 23 známými klimatickými jednotkami**. Aplikace vybere jednotku, jejímž intervalům se profil místa podobá nejvíce. Jednotky tvoří škálu od nejchladnějších typů `CH1` až po nejteplejší typ `T5`.
+
+> **Stručné vysvětlení pro uživatele aplikace:** Klimatické oblasti inspirované Quittovou klasifikací ukazují, jakému typu klimatu se zvolené místo ve vybraném období nejvíce podobá. Výpočet porovnává teploty, srážky a další klimatické ukazatele s 23 jednotkami od chladných po teplé oblasti a zobrazí nejbližší shodu.
+
+Výpočet používá 11 charakteristik dostupných v datovém systému Info4forest. Jde o algoritmickou a opakovatelnou realizaci inspirovanou Quittovým schématem; nejde o prosté překreslení historické Quittovy mapy.
+
+---
+
+## 2. Co aplikace zobrazuje
+
+### 2.1 Výběr klimatického zdroje, lokality a období
+
+Aplikace umožňuje zvolit:
+
+- **klimatický zdroj**, například historickou reanalýzu ERA5-Land nebo budoucí klimatický model;
+- **lokalitu**, pro kterou je zdroj dostupný;
+- **počáteční a koncový rok** analyzovaného období.
+
+Laický název zdroje je určen pro běžného uživatele, například „Historické klima / model ERA5-Land / 10 × 10 km“. Technický název dostupný v informační nápovědě upřesňuje konkrétní model, regionální model a scénář, například `EC-Earth / REMO2020 / SSP3-7.0` [T4].
+
+### 2.2 Mapa klimatických oblastí
+
+Základní mapa zobrazuje pro každé mapové místo nejlépe odpovídající klimatickou jednotku. Barevná škála postupuje od chladných jednotek přes mírně teplé k teplým. Mapa poskytuje prostorový přehled a umožňuje rozpoznat rozdíly mezi nížinami, středními polohami a horskými oblastmi.
+
+Po kliknutí do mapy se zobrazí podrobnosti pro konkrétní bod:
+
+- klimatická jednotka a její slovní popis;
+- interní český kód, například `T2`, a anglický/atlasový kód, například `W2`;
+- skóre shody;
+- průměrné hodnoty jedenácti klimatických charakteristik;
+- trend klimatické jednotky a jeho statistická významnost;
+- nejhorší souvislá nepříznivá odchylka od trendové linie;
+- trendy jednotlivých klimatických charakteristik.
+
+### 2.3 Mapa trendu klimatických oblastí
+
+Mapa **Trend klimatických oblastí / Climate zone trends** ukazuje odhadovaný posun po škále klimatických jednotek během zvoleného období. Vizualizovaná veličina `estimated_total_change` vyjadřuje odhad celkové změny:
+
+- kladná hodnota znamená posun směrem k teplejším klimatickým jednotkám;
+- záporná hodnota znamená posun směrem k chladnějším jednotkám;
+- hodnota blízká nule znamená malý nebo žádný systematický posun.
+
+Jde o spojitou odhadovanou změnu pořadí jednotek, nikoli o prosté odečtení kódu prvního a posledního roku. Výpočet používá roční hodnoty za celé období.
+
+### 2.4 Jedenáct map klimatických charakteristik
+
+Vedle klimatických oblastí lze samostatně zobrazit všech jedenáct charakteristik. Každá mapa zobrazuje průměrnou hodnotu charakteristiky za zvolené období. U vybraného bodu se zároveň zobrazuje její trend; neprůkazný trend je v aplikaci označen pomlčkou.
+
+### 2.5 Trendové informace pro vybraný bod
+
+Pro zvolený bod aplikace uvádí:
+
+- **Celkovou změnu** – odhad změny za celé období;
+- **Trend za dekádu** – odhadovanou změnu za deset let;
+- **Významný trend: ano/ne** – výsledek Mannova–Kendallova testu;
+- **Nejhorší odchylku od trendu** – nejzávažnější souvislé období nepříznivých odchylek;
+- **Trvání** – délku této epizody v letech;
+- **Průměrné zhoršení** – průměrnou velikost nepříznivé odchylky během epizody.
+
+„Významný“ v tomto kontextu znamená **statisticky průkazný**, nikoli automaticky ekologicky nebo hospodářsky významný.
+
+### 2.6 Ukázky rozhraní
+
+![Mapa klimatických oblastí a analytický panel workflow WF5](info4forest_WF5_ukazka_mapy.png)
+
+*Obrázek 1: Základní zobrazení mapy klimatických oblastí, volby zdroje a období a detailu klimatické jednotky s charakteristikami.*
+
+![Workflow WF5 v kontextu aplikace Info4forest](info4forest_WF5_ukazka_aplikace.png)
+
+*Obrázek 2: Workflow WF5 v prostředí aplikace Info4forest včetně projektové navigace a panelu výsledků.*
+
+---
+
+## 3. Jak číst hlavní výsledky
+
+### 3.1 Klimatická oblast a klimatická jednotka
+
+Quittovo schéma rozlišuje tři široké oblasti:
+
+- **CH – chladná oblast**: `CH1` až `CH7`;
+- **MT – mírně teplá oblast**: `MT1` až `MT11`;
+- **T – teplá oblast**: `T1` až `T5`.
+
+Aplikace vrací konkrétní **klimatickou jednotku**, nikoliv pouze jednu ze tří širokých oblastí. Jednotka je nejbližší klimatický typ podle společného vyhodnocení všech charakteristik.
+
+Pro anglickou verzi se používají atlasové kódy `C1–C7`, `MW1–MW11` a `W1–W5`. Interní výpočetní kódy zůstávají `CH`, `MT` a `T` [T3].
+
+### 3.2 Shoda
+
+Hodnota **shoda** (`best_score`) nabývá hodnot od 0 do 1. Vyjadřuje, jak dobře se vypočtených jedenáct hodnot vejde do intervalů nejlepší klimatické jednotky.
+
+- hodnota blízká `1` znamená velmi dobrou podobnost;
+- střední hodnota znamená částečnou podobnost nebo polohu blízko hranic více jednotek;
+- nízká hodnota znamená, že ani nejlepší z 23 jednotek neodpovídá místu příliš dobře.
+
+Shoda **není pravděpodobnost**, interval spolehlivosti ani podíl území. Nelze například říci, že skóre `0,69` znamená 69% pravděpodobnost příslušnosti k jednotce.
+
+### 3.3 Průměr
+
+U klimatické charakteristiky označuje „Průměr“ aritmetický průměr ročních hodnot za celé vybrané období. Například průměrný počet letních dnů za období 1990–2009 je průměrem dvaceti ročních hodnot.
+
+### 3.4 Trend a statistická významnost
+
+Trend je odhadnut Senovou směrnicí z ročních hodnot. Statistická významnost je vyhodnocena Mannovým–Kendallovým testem. Pokud test neprokáže trend na nastavené hladině významnosti, aplikace u trendu jednotlivé charakteristiky zobrazí pomlčku. To neznamená, že hodnota byla po celé období neměnná; znamená to, že dostupná řada neposkytuje dostatečně silný důkaz o monotónním trendu.
+
+### 3.5 Nejhorší nepříznivá epizoda
+
+Nejhorší epizoda je nejzávažnější souvislý úsek let, ve kterém se hodnoty nacházely na nepříznivé straně robustní trendové linie. „Nepříznivý“ směr závisí na charakteristice. Například růst letních dnů je ve výchozím nastavení považován za nepříznivý nárůst, zatímco pokles srážkového úhrnu ve vegetačním období za nepříznivý pokles [T2].
+
+---
+
+## 4. Klimatické zdroje a sledované lokality
+
+### 4.1 Lokality
+
+Katalog aplikace obsahuje tyto lokality [T4]:
+
+| Kód | Český název | Anglický název | Bounding box `[minLon, minLat, maxLon, maxLat]` |
+|---|---|---|---|
+| `cz` | Česko | Czechia | `[12.07, 48.48, 18.97, 51.08]` |
+| `sk` | Slovensko | Slovakia | `[16.8174, 47.6296, 22.7629, 49.705]` |
+| `maestrazgo_mount` | pohoří Maestrazgo | Maestrazgo Mountains | `[-1.09395, 39.8289, 0.297912, 40.8966]` |
+| `southern_fi` | Jižní Finsko | Southern Finland | `[20.3719, 58.9769, 32.7637, 63.1035]` |
+
+Bounding box vymezuje datové pokrytí zdroje. Neznamená automaticky administrativní hranici státu nebo pilotního území.
+
+### 4.2 Klimatické zdroje
+
+| Název zobrazovaný uživateli | Odborný technický název | Dostupné lokality |
+|---|---|---|
+| Historické klima / model ERA5-Land / 10 × 10 km | `ERA5-Land` | `cz` |
+| Budoucí klima, pesimistický scénář / model MPI / 12 × 12 km | `MPI / REMO2020 / SSP3-7.0` | `cz`, `sk`, `maestrazgo_mount`, `southern_fi` |
+| Budoucí klima, pesimistický scénář / model EC-Earth / 12 × 12 km | `EC-Earth / REMO2020 / SSP3-7.0` | `cz`, `sk`, `maestrazgo_mount`, `southern_fi` |
+| Budoucí klima, pesimistický scénář / model MIROC / 12 × 12 km | `MIROC / REMO2020 / SSP3-7.0` | `cz`, `sk`, `maestrazgo_mount`, `southern_fi` |
+
+Historická reanalýza a klimatický model nejsou totéž:
+
+- **reanalýza** kombinuje meteorologická pozorování s numerickým modelem a poskytuje konzistentní rekonstrukci minulého klimatu;
+- **klimatická projekce** simuluje možný budoucí vývoj podle zvoleného emisního/scénářového předpokladu a modelového řetězce.
+
+Výsledky různých modelů se nemají chápat jako přesná předpověď konkrétního roku. Slouží k hodnocení možného dlouhodobého vývoje a modelové nejistoty.
+
+---
+
+## 5. Vztah k Quittově klasifikaci
+
+### 5.1 Původní klasifikační schéma
+
+Quittova klasifikace je příkladem **komplexní klimatologie**: území se nezařazuje podle jedné proměnné, ale podle kombinace tříd více klimatologických charakteristik. Publikace UPOL/ČHMÚ uvádí 23 klimatických jednotek ve třech oblastech, definovaných kombinacemi 14 charakteristik [1, s. 3–6; PDF s. 4–7].
+
+Původní hranice byly vytvořeny pro klimatické poměry Československa a vycházely z historických mapových podkladů. Autoři UPOL/ČHMÚ upozorňují, že intervaly jednotlivých jednotek se překrývají a praktická realizace klasifikace obsahuje neurčitost i určitý podíl expertního rozhodování [1, s. 4; PDF s. 5].
+
+### 5.2 Nejistota při přiřazení
+
+Podrobná analýza UPOL/ČHMÚ ukázala, že žádný hodnocený čtverec nesplnil všech 14 původních kritérií a nejčastěji bylo splněno jen 6 až 9 kritérií. Shodné maximum navíc může nastat u více jednotek [1, s. 13–14; PDF s. 14–15]. Proto je vhodné výsledek chápat jako **nejbližší klimatický typ**, nikoliv jako absolutní a bezchybnou hranici.
+
+UPOL/ČHMÚ popisuje také digitální metodu maxima splněných kritérií, v níž se při shodě upřednostňuje teplejší jednotka. Současně upozorňuje, že různé metody mohou při stejných vstupních datech vést k odlišné realizaci mapy [1, s. 14; PDF s. 15].
+
+### 5.3 Co přebírá Info4forest a co je vlastní výpočetní rozšíření
+
+Info4forest přebírá:
+
+- systém 23 jednotek a tří širokých oblastí;
+- kódy a slovní charakteristiky jednotek;
+- intervalové meze použitých klimatických charakteristik;
+- orientaci škály od chladnějších k teplejším jednotkám.
+
+Info4forest doplňuje vlastní algoritmické postupy:
+
+- používá jedenáct dostupných charakteristik;
+- hodnotí podobnost fuzzy skórem místo čistě binárního splňuje/nesplňuje;
+- interpoluje bodové hodnoty metodou IDW;
+- umožňuje libovolné dostupné víceleté období;
+- počítá robustní trendy, jejich statistickou významnost a nepříznivé epizody;
+- pracuje s více klimatickými zdroji a lokalitami.
+
+Proto je správné označení **„klimatické oblasti inspirované Quittovou klasifikací“**. Výstup není totožný s historickou Quittovou mapou ani s mapou UPOL/ČHMÚ pro období 1961–2000.
+
+---
+
+## 6. Jedenáct použitých klimatických charakteristik
+
+| Index v datech | Kód | Název | Jednotka | Význam |
+|---:|---|---|---|---|
+| 0 | `SUM25` | Roční počet letních dnů | dny | Počet dnů, kdy maximální denní teplota dosáhne alespoň 25 °C. |
+| 1 | `VEG10` | Roční počet dnů s průměrnou teplotou ≥ 10 °C | dny | Orientačně vyjadřuje délku teplejší části roku vhodné pro vegetaci. |
+| 2 | `FROST0` | Roční počet mrazových dnů | dny | Počet dnů, kdy minimální denní teplota klesne pod 0 °C. |
+| 3 | `ICE0` | Roční počet ledových dnů | dny | Počet dnů, kdy maximální denní teplota zůstane pod 0 °C. |
+| 4 | `T_JAN` | Průměrná teplota v lednu | °C | Charakteristika teplotních poměrů uprostřed zimy. |
+| 5 | `T_APR` | Průměrná teplota v dubnu | °C | Charakteristika jarních teplotních poměrů. |
+| 6 | `T_JUL` | Průměrná teplota v červenci | °C | Charakteristika teplotních poměrů uprostřed léta. |
+| 7 | `T_OCT` | Průměrná teplota v říjnu | °C | Charakteristika podzimních teplotních poměrů. |
+| 8 | `RAIN1` | Roční počet srážkových dnů ≥ 1 mm | dny | Počet dnů se srážkovým úhrnem alespoň 1 mm. |
+| 9 | `P_APR_SEP` | Srážkový úhrn duben–září | mm | Úhrn srážek za vegetační část roku od dubna do září. |
+| 10 | `P_OCT_MAR` | Srážkový úhrn říjen–březen | mm | Úhrn srážek za chladnou část roku od října do března. |
+
+Původní Quittovo schéma pracuje se 14 charakteristikami [1, s. 4–7; PDF s. 5–8]. Info4forest používá jedenáct charakteristik dostupných ve sjednocené datové struktuře WF5. Nejsou zahrnuty charakteristiky spojené se sněhovou pokrývkou, oblačností a jasnými/zamračenými dny. Tato redukce je jedním z důvodů, proč výstup označujeme jako klasifikací inspirovaný, nikoli jako její úplnou reprodukci.
+
+---
+
+## 7. Přehled klimatických oblastí a jednotek
+
+### 7.1 Orientační škála
 
 ```text
-[year, ind, y, x]
+NEJCHLADNĚJŠÍ                                                        NEJTEPLEJŠÍ
+CH1 → CH2 → CH3 → CH4 → CH5 → CH6 → CH7 → MT1 → … → MT11 → T1 → T2 → T3 → T4 → T5
+│----------- chladná oblast -----------││------ mírně teplá oblast ------││-- teplá --│
 ```
 
-kde:
+Pořadí je orientační klimatická škála používaná výpočtem. Rozdíl jednoho pořadového stupně nelze automaticky interpretovat jako konstantní fyzikální změnu teploty nebo srážek; sousední jednotky jsou definovány kombinací více proměnných.
 
-- `year` je kalendářní rok,
-- `ind` je index klimatické charakteristiky 0 až 10,
-- `y` je index řádku prostorové mřížky,
-- `x` je index sloupce prostorové mřížky.
+### 7.2 Přehled všech 23 jednotek
 
-Příklad produkční kolekce v přiloženém registru:
+Slovní charakteristiky v následující tabulce vycházejí z tabulky 1 publikace UPOL/ČHMÚ [1, s. 4–5; PDF s. 5–6] a jsou normalizovány podle metadat aplikace [T3].
 
-```text
-era5l_cz_yindicators
-```
-
-Tato kolekce je popsaná jako roční předpočtené klimatické indikátory na české mřížce, uložené jako 4D pole `[year, ind, y, x]`. Pro výpočty scénářových nebo modelových dat lze použít i jiné kolekce stejného typu, pokud mají stejnou strukturu indikátorů.
-
-Prostorová mřížka je definována v souboru `rasdaman_registry.json`. Registr obsahuje metadata kolekcí, časových os, prostorových mřížek, souřadnic a napojení na rasdaman.
+| Interní kód | Anglický/atlasový kód | Český název | Slovní charakteristika |
+|---|---|---|---|
+| `CH1` | `C1` | Chladná 1 | Léto velmi krátké, chladné, velmi vlhké, přechodné období velmi dlouhé s velmi chladným jarem a chladným podzimem, zima velmi dlouhá, velmi chladná, velmi vlhká s velmi dlouhým trváním sněhové pokrývky |
+| `CH2` | `C2` | Chladná 2 | Léto velmi krátké, chladné, velmi vlhké (ale ve srovnání s rajonem C1 s menším úhrnem srážek), přechodné období velmi dlouhé s velmi chladným jarem a chladným podzimem, zima velmi dlouhá, velmi chladná, velmi vlhká (ale ve srovnání s rajonem C1 s menším úhrnem srážek), s velmi dlouhým trváním sněhové pokrývky |
+| `CH3` | `C3` | Chladná 3 | Léto velmi krátké, chladné a vlhké, přechodné období velmi dlouhé s velmi chladným až chladným jarem a chladným podzimem, zima velmi dlouhá, velmi chladná, vlhká s velmi dlouhým trváním sněhové pokrývky |
+| `CH4` | `C4` | Chladná 4 | Léto velmi krátké, chladné a vlhké, přechodné období velmi dlouhé s chladným jarem a mírně chladným podzimem, zima velmi dlouhá, velmi chladná, vlhká, s velmi dlouhým trváním sněhové pokrývky |
+| `CH5` | `C5` | Chladná 5 | Léto velmi krátké až krátké, mírně chladné a vlhké, přechodné období dlouhé s chladným jarem a mírně chladným podzimem, zima velmi dlouhá a chladná, mírně vlhká s dlouhým trváním sněhové pokrývky |
+| `CH6` | `C6` | Chladná 6 | Léto velmi krátké až krátké, mírně chladné, vlhké až velmi vlhké, přechodné období dlouhé s chladným jarem a mírně chladným podzimem, zima velmi dlouhá, mírně chladná, vlhká, s dlouhým trváním sněhové pokrývky |
+| `CH7` | `C7` | Chladná 7 | Léto velmi krátké až krátké, mírně chladné a vlhké, přechodné období dlouhé s mírně chladným jarem a mírným podzimem, zima dlouhá, mírná, mírně vlhká s dlouhým trváním sněhové pokrývky |
+| `MT1` | `MW1` | Mírně teplá 1 | Léto krátké, mírně chladné a vlhké, přechodné období velmi dlouhé s mírně chladným jarem a mírným podzimem, zima normálně dlouhá, chladná, suchá až mírně suchá s dlouhým trváním sněhové pokrývky |
+| `MT2` | `MW2` | Mírně teplá 2 | Léto krátké, mírné až mírně chladné, mírně vlhké, přechodné období krátké s mírným jarem a mírným podzimem, zima normálně dlouhá s mírnými teplotami, suchá s normálně dlouhým trváním sněhové pokrývky |
+| `MT3` | `MW3` | Mírně teplá 3 | Léto krátké, mírné až mírně chladné, suché až mírně suché, přechodné období normální až dlouhé s mírným jarem a mírným podzimem, zima normálně dlouhá, mírná až mírně chladná, suchá až mírně suchá s normálním až krátkým trváním sněhové pokrývky |
+| `MT4` | `MW4` | Mírně teplá 4 | Léto krátké, mírné, suché až mírně suché, přechodné období krátké s mírným jarem a mírným podzimem, zima normálně dlouhá, mírně teplá a suchá s krátkým trváním sněhové pokrývky |
+| `MT5` | `MW5` | Mírně teplá 5 | Léto normálně dlouhé až krátké, mírné až mírně chladné, suché až mírně suché, přechodné období normální až dlouhé s mírným jarem a mírným podzimem, zima normálně dlouhá, mírně chladná, suchá až mírně suchá, s normálním trváním sněhové pokrývky |
+| `MT6` | `MW6` | Mírně teplá 6 | Léto normálně dlouhé až dlouhé, mírné, mírně vlhké, přechodné období normální až dlouhé s mírným až mírně teplým jarem a mírným podzimem, zima normálně dlouhá, chladná, suchá až mírně suchá s normálním trváním sněhové pokrývky |
+| `MT7` | `MW7` | Mírně teplá 7 | Léto normálně dlouhé, mírné, mírně suché, přechodné období krátké s mírným jarem a mírně teplým podzimem, zima normálně dlouhá, mírně teplá, suchá až mírně suchá s krátkým trváním sněhové pokrývky |
+| `MT8` | `MW8` | Mírně teplá 8 | Léto dlouhé, teplé, mírně vlhké, přechodné období normálně dlouhé s mírně teplým jarem a mírně teplým podzimem, zima normálně dlouhá, mírná až mírně chladné, suchá, s krátkým trváním sněhové pokrývky |
+| `MT9` | `MW9` | Mírně teplá 9 | Léto dlouhé, teplé, suché až mírně suché, přechodné období krátké s mírným až mírně teplým jarem a mírně teplým podzimem, zima krátká, mírná, suchá, s krátkým trváním sněhové pokrývky |
+| `MT10` | `MW10` | Mírně teplá 10 | Léto dlouhé, teplé, mírně suché, přechodné období krátké s mírně teplým jarem a mírně teplým podzimem, zima krátká, mírně teplá a velmi suchá, s krátkým trváním sněhové pokrývky |
+| `MT11` | `MW11` | Mírně teplá 11 | Léto dlouhé, teplé a suché, přechodné období krátké s mírně teplým jarem a mírně teplým podzimem, zima krátká, teplá a velmi suchá, s krátkým trváním sněhové pokrývky |
+| `T1` | `W1` | Teplá 1 | Léto dlouhé, teplé a suché, přechodné období krátké s mírně teplým až teplým jarem a mírně teplým až teplým podzimem, zima krátká, mírná až mírně chladná, suchá až velmi suchá, s krátkým trváním sněhové pokrývky |
+| `T2` | `W2` | Teplá 2 | Léto dlouhé, teplé a suché, přechodné období velmi krátké s teplým až mírně teplým jarem a mírně teplým až teplým podzimem, zima krátká, mírně teplá, suchá až velmi suchá, s velmi krátkým trváním sněhové pokrývky |
+| `T3` | `W3` | Teplá 3 | Léto velmi dlouhé, velmi teplé a suché, přechodné období krátké s teplým jarem a teplým podzimem, zima krátká, mírná, suchá až velmi suchá, s krátkým trváním sněhové pokrývky |
+| `T4` | `W4` | Teplá 4 | Léto velmi dlouhé, velmi teplé a velmi suché, přechodné období velmi krátké s teplým jarem a teplým podzimem, zima krátká, mírně teplá, suchá až velmi suchá, s velmi krátkým trváním sněhové pokrývky |
+| `T5` | `W5` | Teplá 5 | Léto velmi dlouhé, velmi teplé a velmi suché, přechodné období velmi krátké s teplým jarem a teplým podzimem, zima velmi krátká, teplá, suchá až velmi suchá, s velmi krátkým trváním sněhové pokrývky |
 
 ---
 
-## 4. Použitých 11 klimatických charakteristik
+## 8. Metodika výpočtu klimatické jednotky
 
-| Index `ind` | Kód | Český význam | Jednotka |
-|---:|---|---|---|
-| 0 | `SUM25` | Roční počet letních dnů, tj. dnů s maximální teplotou alespoň 25 °C | dny |
-| 1 | `VEG10` | Roční počet dnů s průměrnou teplotou alespoň 10 °C | dny |
-| 2 | `FROST0` | Roční počet mrazových dnů, tj. dnů s minimální teplotou pod 0 °C | dny |
-| 3 | `ICE0` | Roční počet ledových dnů, tj. dnů s maximální teplotou pod 0 °C | dny |
-| 4 | `T_JAN` | Průměrná teplota v lednu | °C |
-| 5 | `T_APR` | Průměrná teplota v dubnu | °C |
-| 6 | `T_JUL` | Průměrná teplota v červenci | °C |
-| 7 | `T_OCT` | Průměrná teplota v říjnu | °C |
-| 8 | `RAIN1` | Roční počet srážkových dnů se srážkami alespoň 1 mm | dny |
-| 9 | `P_APR_SEP` | Úhrn srážek za duben až září, tedy vegetační období | mm |
-| 10 | `P_OCT_MAR` | Úhrn srážek za říjen až březen, tedy zimní období | mm |
+### 8.1 Vstupní datová struktura
 
-Pořadí indikátorů je důležité, protože odpovídá ose `ind` v rasdaman kolekci i mapování v souboru `FWF5_quitt_limits_11_rasdaman_index.json`.
-
----
-
-## 5. Přehled výpočetního postupu
-
-Celý výpočet lze shrnout do těchto kroků:
-
-1. **Výběr kolekce a období**  
-   Uživatel zadá rasdaman kolekci, počáteční rok a koncový rok. API ověří, že požadované roky jsou dostupné.
-
-2. **Výběr místa nebo území**  
-   Uživatel zadá buď bod (`lat`, `lon`), nebo prostorový rozsah (`bbox`). U mřížkového výstupu může zadat také krok výstupní mřížky `step_lat` a `step_lon`.
-
-3. **Načtení ročních indikátorů z Rasdamanu**  
-   Z kolekce se načte blok dat pro zadané roky, indikátory 0 až 10 a příslušné prostorové okno.
-
-4. **Výpočet víceletých průměrů**  
-   Hodnoty indikátorů se sečtou přes roky a vydělí počtem let. Vznikne pole průměrných indikátorů pro celé období.
-
-5. **Interpolace na zadaný bod nebo vlastní výstupní mřížku**  
-   Pokud je výstup počítán mimo původní středy buněk, hodnoty 11 indikátorů se dopočítají metodou IDW z okolních rasdaman buněk.
-
-6. **Porovnání s Quittovou limitní tabulkou**  
-   Pro každou z 23 klimatických jednotek se spočítá míra shody každého indikátoru s intervalem dané jednotky.
-
-7. **Výběr nejlepší klimatické jednotky**  
-   Pro každou jednotku se spočítá průměrné fuzzy skóre. Vybere se jednotka s nejvyšším skóre. Při shodě vyhrává teplejší jednotka.
-
-8. **Vytvoření výstupu**  
-   Výsledkem je GeoJSON s bodovou geometrií. Vlastnosti obsahují minimálně `best_unit` a `best_score`; u bodového výpočtu také průměrné hodnoty všech 11 indikátorů. Trendové endpointy používají stejnou strukturu GeoJSON, ale jejich vlastnosti obsahují trendové metriky odvozené z ročních hodnot.
-
----
-
-## 6. Výpočet víceletých průměrů
-
-Nechť:
-
-- `i` je index klimatické charakteristiky,
-- `y` je rok,
-- `s` je buňka rasdaman mřížky,
-- `I_i(y, s)` je roční hodnota indikátoru `i` v roce `y` a buňce `s`,
-- `Y` je množina let od `start_year` do `end_year` včetně,
-- `n` je počet let ve výběru.
-
-Víceletý průměr indikátoru se počítá jako:
+Roční klimatické charakteristiky jsou uloženy v rastrové kolekci v pořadí:
 
 ```text
-mean_i(s) = (1 / n) * sum_{y in Y} I_i(y, s)
+[year, indicator, y, x]
 ```
 
-V kódu se pro efektivitu používá rasdaman dotaz typu `condense + over yr`, který sečte vybrané roky přímo na straně datového úložiště. Python potom vydělí součet počtem let.
+Každá prostorová buňka tedy obsahuje pro každý rok jedenáct hodnot. Aplikace nejprve ověří, že zvolené období a souřadnice leží v rozsahu vybraného datového zdroje [T1].
 
-Výpočet předpokládá, že rasdaman kolekce obsahuje kompletní pokrytí požadovaného období. Pokud některý požadovaný rok v kolekci chybí, výpočet se zastaví chybou. Numerické chybějící hodnoty jsou reprezentovány jako `NaN` a mohou ovlivnit následnou interpolaci nebo skórování.
+### 8.2 Víceletý průměr
 
----
-
-## 7. Prostorová práce s mřížkou
-
-Souřadnice mřížky se načítají univerzálním modulem `grid_coords_universal.py`. Implementace podporuje dva typy mřížek:
-
-1. **Separable 1D grid**  
-   Zeměpisné délky a šířky lze vytvořit jako dvě samostatná 1D pole, typicky pomocí `linspace`. Příkladem je česká ERA5-Land mřížka s pravidelným krokem.
-
-2. **Lookup 2D grid**  
-   Zeměpisná šířka a délka jsou uloženy jako 2D souřadnicové vrstvy. Tento režim je vhodný například pro rotované regionální klimatické mřížky.
-
-Pro bodový výpočet se nejprve najde nejbližší mřížková buňka a kolem ní se vybere kandidátní okno. Pro mřížkový výpočet se z požadovaného území stanoví prostorový rozsah dat, který je potřeba načíst z Rasdamanu.
-
----
-
-## 8. IDW interpolace
-
-Pokud požadovaný bod nebo bod vlastní výstupní mřížky neleží přesně ve středu rasdaman buňky, dopočítají se hodnoty 11 indikátorů metodou IDW, tedy inverse distance weighting.
-
-Nechť:
-
-- `p` je požadovaný bod,
-- `g_j` jsou okolní rasdaman body,
-- `d_j` je vzdálenost mezi `p` a `g_j`, počítaná haversinovou vzdáleností,
-- `p_idw` je parametr mocniny IDW, výchozí hodnota je `2.0`,
-- `k` je maximální počet použitých sousedů, výchozí hodnota je `9`.
-
-Váha souseda je:
+Pro statickou mapu se pro každý indikátor `i` a místo `s` vypočítá průměr přes všechny roky zvoleného období:
 
 ```text
-w_j = 1 / d_j^p_idw
+mean_i(s) = (1 / n) × Σ I_i(year, s)
 ```
 
-Interpolovaná hodnota indikátoru je:
+Počáteční i koncový rok jsou zahrnuty. Výpočet tedy neporovnává pouze první a poslední rok.
+
+### 8.3 Prostorová interpolace
+
+Mapový výstup na nativní datové mřížce používá přímo hodnoty zdrojových buněk. Pro přesně zvolený bod, který zpravidla neleží ve středu buňky, se používá **IDW – inverse distance weighting**. Bližší datové body mají vyšší váhu než vzdálenější:
 
 ```text
-I_hat_i(p) = sum_j(w_j * mean_i(g_j)) / sum_j(w_j)
+w_j = 1 / d_j^p
+interpolovaná_hodnota = Σ(w_j × hodnota_j) / Σ(w_j)
 ```
 
-Pokud požadovaný bod leží přesně ve středu některé mřížkové buňky, interpolace se nepoužije a vrátí se hodnota této buňky.
+Výchozí exponent je `p = 2`. Použije se nejvýše devět nejbližších platných bodů z lokálního okolí. Vzdálenost se počítá po zemském povrchu. Pokud požadovaná souřadnice přesně odpovídá zdrojovému bodu, vrátí se jeho hodnota bez průměrování [T1, T5].
 
-Výchozí nastavení:
+IDW nezvyšuje skutečné prostorové rozlišení zdrojových dat. Vytváří plynulý odhad mezi dostupnými body.
 
-| Parametr | Význam | Výchozí hodnota |
-|---|---|---:|
-| `idw_power` | exponent vážení vzdáleností | `2.0` |
-| `idw_k` | maximální počet nejbližších sousedů pro mřížkový výpočet | `9` |
-| `idw_radius_px` | poloměr kandidátního okna v pixelech | u API zpravidla `2` |
-| `idw_max_dist_m` | volitelný maximální dosah souseda v metrech | `null` |
+### 8.4 Dílčí podobnost k intervalu
 
-Čím vyšší je `idw_power`, tím větší vliv má nejbližší mřížková buňka. Čím nižší je `idw_power`, tím více se výsledek blíží běžnému průměru okolních buněk.
-
----
-
-## 9. Limitní tabulka Quittových jednotek
-
-Limitní hodnoty jsou uloženy v souboru:
+Každá klimatická jednotka obsahuje pro každý indikátor dolní a horní mez. Pro hodnotu uvnitř intervalu je podobnost rovna `1`. Mimo interval klesá lineárně až k nule:
 
 ```text
-FWF5_quitt_limits_11_rasdaman_index.json
+μ = 1                                         pro lower ≤ value ≤ upper
+μ = max(0, 1 − (lower − value) / tolerance)   pro value < lower
+μ = max(0, 1 − (value − upper) / tolerance)   pro value > upper
 ```
 
-Soubor obsahuje:
+Použité toleranční šířky jsou [T5]:
 
-- zdroj limitů odvozený z Quittovy tabulky klimatických charakteristik,
-- seznam použitých 11 indikátorů,
-- jednotky indikátorů,
-- pořadí klimatických jednotek od chladných po teplé,
-- mapování indikátorů na osu `ind` v rasdaman kolekci,
-- intervaly hodnot pro každou klimatickou jednotku.
-
-Klimatické jednotky jsou vyhodnocovány v tomto pořadí:
-
-```text
-CH1, CH2, CH3, CH4, CH5, CH6, CH7,
-MT1, MT2, MT3, MT4, MT5, MT6, MT7, MT8, MT9, MT10, MT11,
-T1, T2, T3, T4, T5
-```
-
-Toto pořadí je důležité i pro řešení shodných výsledků. Protože kód při stejném skóre přepíše předchozí jednotku pozdější jednotkou v pořadí, vyhrává při shodě teplejší jednotka.
-
----
-
-## 10. Fuzzy skórování klimatických jednotek
-
-Pro každou klimatickou jednotku `u` a každý indikátor `i` existuje interval:
-
-```text
-[lower_{u,i}, upper_{u,i}]
-```
-
-Hodnota indikátoru `v` dostane dílčí skóre `mu_{u,i}(v)`:
-
-- pokud `v` leží uvnitř intervalu, skóre je `1`,
-- pokud `v` leží pod dolní hranicí, skóre lineárně klesá podle vzdálenosti od dolní hranice,
-- pokud `v` leží nad horní hranicí, skóre lineárně klesá podle vzdálenosti od horní hranice,
-- pokud je hodnota dál než toleranční pásmo, skóre je `0`.
-
-Formálně:
-
-```text
-mu = 1                                      pokud lower <= v <= upper
-mu = max(0, 1 - (lower - v) / tolerance)    pokud v < lower
-mu = max(0, 1 - (v - upper) / tolerance)    pokud v > upper
-```
-
-Použité tolerance jsou:
-
-| Skupina indikátorů | Indikátory | Tolerance |
+| Skupina | Charakteristiky | Tolerance |
 |---|---|---:|
 | Počty dnů | `SUM25`, `VEG10`, `FROST0`, `ICE0`, `RAIN1` | 10 dnů |
 | Teploty | `T_JAN`, `T_APR`, `T_JUL`, `T_OCT` | 1 °C |
 | Srážkové úhrny | `P_APR_SEP`, `P_OCT_MAR` | 50 mm |
 
-Celkové skóre jednotky je aritmetický průměr dílčích skóre přes všechny dostupné indikátory:
+Tolerance nejsou převzaty jako samostatný parametr z původní Quittovy publikace; jsou součástí výpočetní implementace Info4forest.
+
+### 8.5 Celkové skóre a výběr jednotky
+
+Celkové skóre jednotky je aritmetický průměr dílčích podobností všech platných indikátorů:
 
 ```text
-score_u = mean_i(mu_{u,i})
+score(unit) = mean(μ_1, μ_2, …, μ_11)
+best_unit   = jednotka s nejvyšším score
 ```
 
-Výsledná jednotka je:
-
-```text
-best_unit = argmax_u(score_u)
-```
-
-Hodnota `best_score` je příslušné maximální skóre. Interpretace:
-
-| `best_score` | Význam |
-|---:|---|
-| blízko `1.0` | místo velmi dobře odpovídá intervalům vybrané jednotky |
-| přibližně `0.5–0.8` | místo odpovídá jednotce částečně; může ležet poblíž hranic více jednotek |
-| nízké skóre | výsledek je nutné interpretovat opatrně; nejlepší jednotka je pouze nejbližší z dostupných možností |
-
-`best_score` není statistická pravděpodobnost. Je to algoritmická míra podobnosti k limitním intervalům.
+Při přesně shodném výsledku více jednotek se upřednostní jednotka pozdější v pořadí od `CH1` k `T5`, tedy teplejší jednotka [T5]. Tento princip je konzistentní s jednou z digitálních realizací popsaných UPOL/ČHMÚ, která při shodném maximu rovněž preferovala teplejší jednotku [1, s. 14; PDF s. 15].
 
 ---
 
-## 11. Výpočet pro bod
+## 9. Metodika trendů
 
-Bodový výpočet se používá pro endpoint typu:
+### 9.1 Proč se nepoužívá jen první a poslední rok
+
+Rozdíl mezi dvěma roky může být silně ovlivněn náhodně teplým, chladným, suchým nebo vlhkým rokem. Trendy proto používají všechny platné roční hodnoty ve zvoleném období.
+
+### 9.2 Senova směrnice
+
+Pro každou dvojici roků se vypočítá změna hodnoty dělená časovým rozdílem. Senova směrnice je medián všech těchto párových směrnic:
 
 ```text
-POST /climaticzones/point
+slope_per_year = median((value_j − value_i) / (year_j − year_i))
+slope_per_decade = 10 × slope_per_year
+estimated_total_change = slope_per_year × (max_year − min_year)
 ```
 
-Typický vstup:
+Medián je méně citlivý na jednotlivé extrémní roky než běžná lineární regrese [T2].
 
-```json
-{
-  "rasdaman_collection": "era5l_cz_yindicators",
-  "start_year": 1991,
-  "end_year": 2020,
-  "lat": 49.595,
-  "lon": 17.251,
-  "idw_radius_px": 2,
-  "idw_power": 2.0
-}
-```
+### 9.3 Mannův–Kendallův test
 
-Postup:
+Mannův–Kendallův test zjišťuje, zda hodnoty vykazují statisticky průkaznou monotónní tendenci. Implementace zohledňuje shodné hodnoty a používá normální aproximaci. Aplikace pracuje s výchozí hladinou `α = 0,05` [T2].
 
-1. API ověří, že bod leží v prostorovém rozsahu zvolené kolekce.
-2. Najde se nejbližší mřížková buňka.
-3. Načte se malé okolní okno z rasdaman kolekce.
-4. Pro každou z 11 charakteristik se spočítá víceletý průměr.
-5. Pokud bod neleží přesně ve středu buňky, hodnoty se interpolují metodou IDW.
-6. Interpolovaných 11 hodnot se porovná s Quittovou limitní tabulkou.
-7. Vrátí se GeoJSON s jedním bodem.
+- `significant = true`: trend je na dané hladině statisticky průkazný;
+- `significant = false`: průkaznost nebyla potvrzena.
 
-Typický výstup obsahuje:
+Statistická průkaznost nevypovídá sama o velikosti nebo praktickém dopadu změny. Proto je nutné společně hodnotit i `estimated_total_change`, `slope_per_decade`, délku období a charakter datového zdroje.
 
-```json
-{
-  "type": "FeatureCollection",
-  "features": [
-    {
-      "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [17.251, 49.595]
-      },
-      "properties": {
-        "best_unit": "MT7",
-        "best_score": 0.842424,
-        "years": {
-          "start": 1991,
-          "end": 2020,
-          "count": 30
-        },
-        "indicators_avg_11": {
-          "SUM25": 42.1,
-          "VEG10": 166.4,
-          "FROST0": 102.0,
-          "ICE0": 31.6,
-          "T_JAN": -1.2,
-          "T_APR": 8.4,
-          "T_JUL": 18.2,
-          "T_OCT": 8.1,
-          "RAIN1": 105.0,
-          "P_APR_SEP": 420.5,
-          "P_OCT_MAR": 235.8
-        }
-      }
-    }
-  ]
-}
-```
+### 9.4 Trend klimatické jednotky
 
-Hodnoty v příkladu jsou ilustrativní.
+Každá klimatická jednotka má pořadí od nejchladnější k nejteplejší. Pro každý rok se z fuzzy skóre odvodí spojitá očekávaná pozice na této škále (`expected_fuzzy_rank`). Následně se na roční řadu této pozice aplikuje Senova směrnice [T2].
+
+Kladný trend znamená posun k teplejším jednotkám; záporný trend posun k chladnějším. Hodnota může být desetinná, protože jde o trend spojité očekávané pozice, nikoliv o počet přeskočených barevných kategorií.
+
+### 9.5 Trend jednotlivé charakteristiky
+
+U map a detailu jednotlivých charakteristik se trend počítá ve fyzikální jednotce dané proměnné:
+
+- dny za dekádu u počtů dnů;
+- °C za dekádu u teplot;
+- mm za dekádu u srážkových úhrnů.
+
+Celková změna je odhad trendu za celé období, nikoli rozdíl první a poslední naměřené/modelované hodnoty.
+
+### 9.6 Nejhorší nepříznivá epizoda
+
+Nejprve se vytvoří robustní trendová linie se Senovou směrnicí a mediánovým průsečíkem. Pro každý rok se určí odchylka od této linie v předem stanoveném nepříznivém směru. Algoritmus vyhledá souvislé úseky kladné nepříznivé odchylky a vybere úsek s nejvyšší celkovou závažností [T2].
+
+- `duration` – počet po sobě jdoucích let;
+- `severity` – součet nepříznivých odchylek;
+- `mean_severity` – průměrná odchylka v epizodě;
+- `peak_anomaly` – největší jednotlivá nepříznivá odchylka.
+
+Tato diagnostika popisuje epizody **vzhledem k dlouhodobému trendu**, nikoli automaticky absolutně nejhorší klimatické období z hlediska lesního hospodářství.
 
 ---
 
-## 12. Výpočet pro území nebo výstupní mřížku
+## 10. Interpretace, nejistoty a omezení
 
-Mřížkový výpočet se používá pro endpoint typu:
+### 10.1 Klimatická jednotka je nejbližší podobnost
 
-```text
-POST /climaticzones/grid
-```
+Hranice klimatických jednotek se v původním schématu překrývají a jejich číselné meze jsou podle UPOL/ČHMÚ ve vztahu k realitě orientační [1, s. 18; PDF s. 19]. Výsledek se proto nemá interpretovat jako přesná přírodní hranice.
 
-### 12.1 Režim nativní mřížky
+### 10.2 Klasifikace byla vytvořena pro jiné historické poměry
 
-Pokud nejsou zadány `step_lat` a `step_lon`, výpočet pracuje přímo s body nativní rasdaman mřížky. Volitelně lze zadat `bbox`, který výstup omezí na konkrétní území.
+Původní meze vycházejí z klimatických hodnot historického Československa. Při aplikaci na jiné regiony, budoucí scénáře nebo hodnoty mimo historický rozsah mohou být některé profily vzdálené všem jednotkám. To se projeví nižší shodou nebo hodnotami na okrajích škály.
 
-V tomto režimu se:
+### 10.3 Používá se 11 charakteristik
 
-1. načte blok hodnot z rasdaman kolekce,
-2. spočítají se víceleté průměry pro každou nativní buňku,
-3. pro každou buňku se provede fuzzy porovnání s Quittovou tabulkou,
-4. výsledkem je GeoJSON s body ve středech rasdaman buněk.
+Info4forest nepoužívá všechny původní charakteristiky. Výsledek proto nelze vydávat za úplnou reprodukci klasifikace z roku 1971 nebo mapy UPOL/ČHMÚ.
 
-### 12.2 Režim vlastní výstupní mřížky
+### 10.4 Rozlišení mapy je omezeno zdrojovými daty
 
-Pokud jsou zadány `step_lat` a `step_lon`, API vytvoří vlastní pravidelnou výstupní mřížku v zeměpisných souřadnicích. Oba parametry musí být zadány současně.
+Plynulé vykreslení a IDW mohou působit detailněji, než je skutečné rozlišení modelu. Například zdroj s rozlišením přibližně 10 × 10 km nemůže spolehlivě popsat mikroklima svahu, údolí nebo porostu v měřítku jednotlivých hektarů.
 
-Typický vstup:
+### 10.5 Modelové zdroje obsahují nejistotu
 
-```json
-{
-  "rasdaman_collection": "era5l_cz_yindicators",
-  "start_year": 1991,
-  "end_year": 2020,
-  "bbox": {
-    "start_lat": 48.6,
-    "end_lat": 51.0,
-    "start_lon": 12.2,
-    "end_lon": 18.8
-  },
-  "step_lat": 0.05,
-  "step_lon": 0.05,
-  "idw_power": 2.0,
-  "idw_k": 9,
-  "idw_radius_px": 2
-}
-```
+Budoucí klimatická data závisejí na globálním modelu, regionálním modelu, scénáři a přirozené variabilitě klimatu. Pro rozhodování je vhodné porovnat více zdrojů, období a případně další odborné podklady.
 
-V tomto režimu se:
+### 10.6 Trend klimatické jednotky je odvozená veličina
 
-1. vytvoří seznam cílových souřadnic podle `bbox`, `step_lat` a `step_lon`,
-2. z rasdaman kolekce se načte rozšířené okolí potřebné pro IDW,
-3. spočítají se víceleté průměry v nativních buňkách,
-4. pro každý cílový bod se 11 indikátorů interpoluje metodou IDW,
-5. pro každý cílový bod se provede fuzzy klasifikace,
-6. výsledkem je GeoJSON s body vlastní výstupní mřížky.
+Jednotka kombinuje více charakteristik. Stejný posun v její trendové škále může být na různých místech způsoben jinou kombinací změn teploty a srážek. Pro věcnou interpretaci je proto vhodné současně prohlédnout trendy jednotlivých charakteristik.
+
+### 10.7 Vhodné a nevhodné použití
+
+Výstupy jsou vhodné zejména pro:
+
+- orientační popis klimatického typu území;
+- porovnání období, lokalit nebo klimatických zdrojů;
+- screening dlouhodobých změn relevantních pro lesní plánování;
+- identifikaci území vhodných pro podrobnější analýzu.
+
+Výstupy samy o sobě nejsou náhradou za:
+
+- lokální měření a mikroklimatické posouzení;
+- dendrologické, půdní, hydrologické nebo stanovištní hodnocení;
+- provozní předpověď počasí;
+- jednoznačný podklad pro zásadní rozhodnutí bez další odborné interpretace.
 
 ---
 
-## 13. Trendové výpočty
+## 11. API jako datové a výpočetní zázemí
 
-Trendové výpočty jsou oddělené od statického výpočtu klimatické zóny za víceleté období. Používají se tehdy, když má být popsáno, jak se klimatická charakteristika nebo klimatická zóna ve zvoleném období vyvíjí v čase.
+Aplikace Info4forest získává katalog zdrojů, mapová data, bodové charakteristiky a trendové diagnostiky prostřednictvím FWF5 Climate API. Pro běžného uživatele není nutné API přímo používat, ale jeho zveřejnění podporuje transparentnost, reprodukovatelnost a integraci výsledků do dalších systémů.
 
-Základní rozdíl je v tom, že trendové endpointy používají roční časovou řadu všech let od `start_year` do `end_year` včetně. Trend se tedy neodvozuje pouze z prvního a posledního roku, protože jednotlivé roky mohou být anomálně teplé, chladné, suché nebo vlhké.
+API nabízí i podrobnější funkce, než které musí být vždy současně viditelné v základním rozhraní, například:
 
-Pro každý požadovaný bod nebo bod výstupní mřížky je postup následující:
+- úplný katalog klimatických zdrojů a lokalit;
+- metadata klimatických charakteristik a jednotek;
+- roční řady všech jedenácti charakteristik pro konkrétní bod;
+- samostatné mapové a bodové trendové výstupy;
+- technické informace o časovém a prostorovém rozsahu datových kolekcí;
+- bohatší diagnostické údaje o trendu, kvalitě řady a posunech různě dlouhých období.
 
-1. načtou se roční hodnoty 11 indikátorů pro všechny požadované roky,
-2. roční hodnoty se interpolují do požadovaného bodu stejnou IDW logikou jako u ostatních endpointů,
-3. podle typu endpointu a zvolené metriky se odvodí roční trendová veličina,
-4. trend se odhadne pomocí Senovy směrnice,
-5. výsledek se vrátí jako vlastnosti GeoJSON prvků.
+Aktuální technická dokumentace API je dostupná zde:
 
-Trendová metoda je ve výstupu označena jako:
+**<https://app.swaggerhub.com/apis/JIRKAVALES_1/Info4forest/1.0.0>**
 
-```text
-sen_slope_yearly
-```
+Příklady endpointů, které jsou podkladem aplikace:
 
-Pro výpočet trendu jsou potřeba alespoň dva platné roky.
+- `/climaticsourcecatalog` – klimatické zdroje a jejich laické i technické názvy;
+- `/climaticsourcecatalog/locations` – lokality a datové rozsahy;
+- `/climaticzones/grid` a `/climaticzones/point` – klimatické jednotky;
+- `/climaticzones/trend/grid` a `/climaticzones/trend/point` – trend klimatických jednotek;
+- `/climatecharacteristics/{characteristic}/grid` – mapy jednotlivých charakteristik;
+- `/climatecharacteristics/trend/{characteristic}/point` – trend charakteristiky v bodě.
 
-### 13.1 Senova směrnice
+Tyto názvy jsou uvedeny pouze pro dohledatelnost technického zázemí; hlavní smysl tohoto dokumentu je věcná interpretace vizualizace a metodiky.
 
-Senova směrnice je robustní neparametrický odhad trendu. Pro všechny platné dvojice let `(a, b)`, kde `b > a`, se spočítá dílčí sklon:
+---
 
-```text
-slope_ab = (value_b - value_a) / (year_b - year_a)
-```
+## 12. Doporučené citování
 
-Výsledný sklon je medián všech párových sklonů:
+Při citování mapy nebo výsledku je vhodné uvést:
 
-```text
-slope_per_year = median(slope_ab)
-```
+1. aplikaci a workflow: **Info4forest, WF5 – Forest-related Climate Area Map**;
+2. klimatický zdroj/model a scénář;
+3. lokalitu a zvolené období;
+4. datum vytvoření nebo stažení výsledku;
+5. odkaz na tuto metodiku;
+6. odborný metodický zdroj [1] a podle potřeby původní Quittovu práci [2].
 
-API dále uvádí:
+Příklad:
 
-```text
-slope_per_decade = 10 * slope_per_year
-estimated_total_change = slope_per_year * (end_year - start_year)
-```
+> Info4forest (2026): WF5 – Forest-related Climate Area Map, klimatický zdroj ERA5-Land, lokalita Česko, období 1991–2020. Klimatické jednotky inspirované Quittovou klasifikací; metodika podle Květoně a Voženílka (2011) a implementace Info4forest.
 
-Tento postup omezuje vliv jednotlivých anomálních roků ve srovnání s prostým rozdílem první rok / poslední rok.
+---
 
-Ve výstupu se mohou objevit také tyto položky:
+## 13. Zdroje
 
-| Položka | Význam |
-|---|---|
-| `valid_years` | počet let s platnými hodnotami použitými pro trend |
-| `pair_count` | počet platných dvojic let použitých pro Senovu směrnici |
-| `sign_consistency` | podíl nenulových párových sklonů s převládajícím znaménkem |
-| `direction` | slovní směr trendu podle `slope_per_decade` a prahové hodnoty |
-| `strength` | slovní síla trendu odvozená z absolutní hodnoty sklonu |
+### Odborné a metodické zdroje
 
-Položka `sign_consistency` není formální test statistické významnosti. Je to jednoduchá diagnostická informace, zda většina párových sklonů ukazuje stejným směrem.
+**[1]** KVĚTOŇ, Vít; VOŽENÍLEK, Vít. *Klimatické oblasti Česka: klasifikace podle Quitta za období 1961–2000 / Climatic Regions of Czechia: Quitt's Classification during Years 1961–2000*. Olomouc: Univerzita Palackého v Olomouci v koedici s Českým hydrometeorologickým ústavem, 2011. M.A.P.S., Num. 3. ISBN 978-80-244-2813-0; ISBN 978-80-86690-89-6.
 
-### 13.2 Trendy jednotlivých klimatických charakteristik
+**[2]** QUITT, Evžen. *Klimatické oblasti Československa*. Studia Geographica, sv. 16. Brno: Geografický ústav ČSAV, 1971, 73 s. Bibliografický údaj podle [1, s. 19; PDF s. 20].
 
-Endpointy pro trend klimatických charakteristik počítají trend vždy pouze pro jeden vybraný indikátor. Nepočítají trend klimatických zón a nevracejí všech 11 indikátorů najednou.
+### Technické zdroje implementace
 
-Typický vzor endpointů:
+**[T1]** `FWF5_API(10).py` – API vrstva, validace vstupů, katalog, výpočetní orchestrace a formát odpovědí.  
+**[T2]** `FWF5_trends(11).py` – Senova směrnice, Mannův–Kendallův test, trend klimatických jednotek a nepříznivé epizody.  
+**[T3]** `FWF5_climate_metadata(3).json` – české a anglické názvy, kódy a slovní popisy klimatických jednotek a charakteristik.  
+**[T4]** `climate_source_catalog(6).json` – katalog klimatických zdrojů, lokalit, laických a technických názvů a názvů Rasdaman kolekcí.  
+**[T5]** `FWF5_quitt_limits_11_rasdaman_index(3).json`, `FWF5_quitt_fuzzy_match_point(3).py` a `FWF5_quitt_fuzzy_match_area_custom_grid(3).py` – limitní intervaly, fuzzy skórování, IDW a pořadí klimatických jednotek.  
+**[T6]** OpenAPI dokumentace FWF5 Climate API: <https://app.swaggerhub.com/apis/JIRKAVALES_1/Info4forest/1.0.0>.
 
-```text
-POST /climatecharacteristics/trend/<characteristic>/point
-POST /climatecharacteristics/trend/<characteristic>/grid
-```
+---
 
-kde `<characteristic>` může být:
+## 14. Příloha A – limitní intervaly používané implementací
 
-```text
-sum25, veg10, frost0, ice0,
-t_jan, t_apr, t_jul, t_oct,
-rain1, p_apr_sep, p_oct_mar
-```
+Následující tabulka uvádí přesné intervaly jedenácti charakteristik používané aktuální implementací [T5]. Jednotky: počty dnů v dnech, teploty v °C a srážkové úhrny v mm.
 
-Například:
+| Jednotka | SUM25 | VEG10 | FROST0 | ICE0 | T_JAN | T_APR | T_JUL | T_OCT | RAIN1 | P_APR_SEP | P_OCT_MAR |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `CH1` | 0–10 | 0–80 | 160–180 | 60–80 | -8–-7 | 0–2 | 10–12 | 2–4 | 140–160 | 900–1000 | 600–700 |
+| `CH2` | 0–10 | 0–80 | 160–180 | 60–70 | -8–-7 | 0–2 | 10–12 | 2–4 | 140–160 | 700–900 | 500–600 |
+| `CH3` | 0–20 | 80–120 | 160–180 | 60–70 | -8–-7 | 0–2 | 12–14 | 2–4 | 120–140 | 600–700 | 400–500 |
+| `CH4` | 0–20 | 80–120 | 160–180 | 60–70 | -7–-6 | 2–4 | 12–14 | 4–5 | 120–140 | 600–700 | 400–500 |
+| `CH5` | 10–30 | 100–120 | 140–160 | 60–70 | -6–-5 | 2–4 | 14–15 | 5–6 | 120–140 | 500–600 | 350–400 |
+| `CH6` | 10–30 | 120–140 | 140–160 | 60–70 | -5–-4 | 2–4 | 14–15 | 5–6 | 140–160 | 600–700 | 400–500 |
+| `CH7` | 10–30 | 120–140 | 140–160 | 50–60 | -4–-3 | 4–6 | 15–16 | 6–7 | 120–130 | 500–600 | 350–400 |
+| `MT1` | 20–30 | 120–140 | 160–180 | 40–50 | -6–-5 | 5–6 | 15–16 | 6–7 | 120–130 | 500–600 | 300–350 |
+| `MT2` | 20–30 | 140–160 | 110–130 | 40–50 | -4–-3 | 6–7 | 16–17 | 6–7 | 120–130 | 450–500 | 250–300 |
+| `MT3` | 20–30 | 120–140 | 130–160 | 40–50 | -4–-3 | 6–7 | 16–17 | 6–7 | 110–120 | 350–450 | 250–300 |
+| `MT4` | 20–30 | 140–160 | 110–130 | 40–50 | -3–-2 | 6–7 | 16–17 | 6–7 | 110–120 | 350–450 | 250–300 |
+| `MT5` | 30–40 | 140–160 | 130–140 | 40–50 | -5–-4 | 6–7 | 16–17 | 6–7 | 100–120 | 350–450 | 250–300 |
+| `MT6` | 30–40 | 140–160 | 140–160 | 40–50 | -6–-5 | 6–7 | 16–17 | 6–7 | 100–120 | 450–500 | 250–300 |
+| `MT7` | 30–40 | 140–160 | 110–130 | 40–50 | -3–-2 | 6–7 | 16–17 | 7–8 | 100–120 | 400–450 | 250–300 |
+| `MT8` | 40–50 | 140–160 | 130–140 | 40–50 | -5–-4 | 7–8 | 17–18 | 7–8 | 100–120 | 400–450 | 250–300 |
+| `MT9` | 40–50 | 140–160 | 110–130 | 30–40 | -4–-3 | 6–7 | 17–18 | 7–8 | 100–120 | 400–450 | 250–300 |
+| `MT10` | 40–50 | 140–160 | 110–130 | 30–40 | -3–-2 | 7–8 | 17–18 | 7–8 | 100–120 | 400–450 | 200–250 |
+| `MT11` | 40–50 | 140–160 | 110–130 | 30–40 | -3–-2 | 7–8 | 17–18 | 7–8 | 90–100 | 350–400 | 200–250 |
+| `T1` | 50–60 | 160–170 | 120–130 | 30–40 | -5–-3 | 7–8 | 17–19 | 7–9 | 90–100 | 350–400 | 200–300 |
+| `T2` | 50–60 | 160–170 | 100–110 | 30–40 | -3–-2 | 8–9 | 18–19 | 7–9 | 90–100 | 350–400 | 200–300 |
+| `T3` | 60–70 | 170–180 | 110–120 | 30–40 | -4–-3 | 8–10 | 19–20 | 8–9 | 90–100 | 350–400 | 200–300 |
+| `T4` | 60–70 | 170–180 | 100–110 | 30–40 | -3–-2 | 9–10 | 19–20 | 9–10 | 80–90 | 300–350 | 200–300 |
+| `T5` | 60–70 | ≥ 180 | 90–100 | ≤ 30 | -2–-1 | 9–10 | 19–20 | 9–10 | 80–90 | 300–350 | 200–300 |
 
-```text
-POST /climatecharacteristics/trend/t_jul/point
-POST /climatecharacteristics/trend/p_apr_sep/grid
-```
+### Poznámka k použití tabulky
 
-Roční hodnota vybraného indikátoru se použije přímo jako trendová veličina. Výsledný sklon má tedy fyzikální jednotku daného indikátoru, například:
-
-- dny za dekádu pro `SUM25`, `VEG10`, `FROST0`, `ICE0` a `RAIN1`,
-- °C za dekádu pro `T_JAN`, `T_APR`, `T_JUL` a `T_OCT`,
-- mm za dekádu pro `P_APR_SEP` a `P_OCT_MAR`.
-
-Typický objekt trendu pro jeden indikátor:
-
-```json
-{
-  "method": "sen_slope_yearly",
-  "characteristic": "T_JUL",
-  "unit": "°C",
-  "slope_per_year": 0.043,
-  "slope_per_decade": 0.43,
-  "estimated_total_change": 1.29,
-  "direction": "increase",
-  "valid_years": 30,
-  "pair_count": 435,
-  "sign_consistency": 0.71
-}
-```
-
-Směr je `increase`, `decrease`, `stable` nebo `unknown` podle sklonu a zadané hodnoty `trend_threshold_per_decade`.
-
-### 13.3 Trendy klimatických zón
-
-Endpointy pro trend klimatických zón počítají trend z ročních vektorů 11 indikátorů. Jsou oddělené od trendů jednotlivých indikátorů.
-
-Vzor endpointů:
-
-```text
-POST /climaticzones/trend/point
-POST /climaticzones/trend/grid
-```
-
-V požadavku lze zvolit trendovou metriku pomocí:
-
-```json
-{
-  "trend_metric": "expected"
-}
-```
-
-nebo:
-
-```json
-{
-  "trend_metric": "exceedance"
-}
-```
-
-Povolené názvy metrik jsou:
-
-```text
-expected, expected_fuzzy_rank,
-exceedance, exceedance_rank_equivalent
-```
-
-Pro každý rok se nejprve 11 ročních indikátorů interpoluje do požadovaného bodu nebo bodu výstupní mřížky. Potom se pro každý rok spočítá vybraná trendová metrika klimatické zóny. Z roční řady této metriky se následně odhadne Senova směrnice.
-
-#### 13.3.1 `expected_fuzzy_rank`
-
-Metrika `expected_fuzzy_rank` vyjadřuje roční pozici klimatické zóny jako spojitou hodnotu na seřazené Quittově škále.
-
-Klimatické jednotky jsou seřazeny od chladných po teplé:
-
-```text
-CH1, CH2, ..., CH7, MT1, ..., MT11, T1, ..., T5
-```
-
-Dostanou pořadové ranky:
-
-```text
-CH1 = 0
-...
-T5 = 22
-```
-
-Pro daný rok se nejprve spočítají fuzzy skóre všech klimatických jednotek. Místo použití pouze vítězné jednotky se vypočte vážený průměr ranku:
-
-```text
-expected_rank = sum_u(rank_u * score_u) / sum_u(score_u)
-```
-
-Tato hodnota je stabilnější než tvrdá roční třída typu `MT7` nebo `MT8`, zejména poblíž hranic klimatických zón.
-
-Trend potom popisuje pohyb po oficiální Quittově škále:
-
-- kladný `slope_per_decade` znamená posun k teplejším klimatickým jednotkám,
-- záporný `slope_per_decade` znamená posun k chladnějším klimatickým jednotkám,
-- hodnoty blízké nule znamenají stabilní pozici na škále.
-
-Typická část výstupu:
-
-```json
-{
-  "method": "sen_slope_yearly",
-  "metric": "expected_fuzzy_rank",
-  "slope_per_decade": 0.72,
-  "slope_unit": "climate_zone_rank_per_decade",
-  "estimated_total_change": 2.16,
-  "direction": "warmer",
-  "strength": "moderate"
-}
-```
-
-Tento příklad znamená, že se dané místo ve zvoleném období posouvá směrem k teplejším Quittovým jednotkám tempem přibližně 0,72 ranku za dekádu.
-
-#### 13.3.2 `exceedance_rank_equivalent`
-
-Metrika `exceedance_rank_equivalent` řeší situace, kdy oficiální Quittova škála narazí na svůj okraj. Teplým okrajem škály je `T5`, chladným okrajem je `CH1`. Pokud je místo už klasifikováno poblíž `T5`, může se dále oteplovat, i když žádná oficiální teplejší Quittova jednotka neexistuje. Stejně tak se může teoreticky posouvat za chladný okraj poblíž `CH1`.
-
-Tato metrika proto měří, nakolik roční hodnoty indikátorů přesahují oficiální Quittovu škálu na některém z jejích okrajů, a tento přesah vyjadřuje jako syntetický rankový ekvivalent.
-
-Pro každý indikátor algoritmus určí, zda posun k teplejším zónám znamená růst nebo pokles hodnoty. Příklady:
-
-- u `SUM25`, `VEG10`, `T_JAN`, `T_APR`, `T_JUL` a `T_OCT` obecně posouvá růst hodnoty indikátoru směrem k teplejším zónám,
-- u `FROST0` a `ICE0` obecně posouvá pokles hodnoty indikátoru směrem k teplejším zónám,
-- srážkové indikátory se vyhodnocují podle své polohy v Quittově limitní tabulce od chladných po teplé jednotky, nikoli podle pevně zakódovaného předpokladu.
-
-Pro každý indikátor a rok se odvodí:
-
-- hranice chladného okraje z jednotky `CH1`,
-- hranice teplého okraje z jednotky `T5`,
-- typický krok jedné klimatické jednotky z rozdílů sousedních jednotek,
-- normalizovaný přesah za teplý okraj,
-- normalizovaný přesah za chladný okraj.
-
-Roční metrika se počítá jako znaménková hodnota:
-
-```text
-signed_exceedance = mean(warm_edge_exceedance) - mean(cold_edge_exceedance)
-```
-
-Interpretace:
-
-| Hodnota | Význam |
-|---:|---|
-| kladná | roční hodnoty více přesahují teplý okraj oficiální škály |
-| záporná | roční hodnoty více přesahují chladný okraj oficiální škály |
-| blízká nule | hodnoty jsou uvnitř oficiální škály nebo přesahují okraje pouze slabě |
-
-Ze série ročních znaménkových přesahů se následně spočítá Senova směrnice.
-
-Typická část výstupu:
-
-```json
-{
-  "method": "sen_slope_yearly",
-  "metric": "exceedance_rank_equivalent",
-  "slope_per_decade": 0.67,
-  "slope_unit": "climate_zone_rank_equivalent_per_decade",
-  "estimated_total_change": 2.0,
-  "direction": "beyond_warm_edge_increase",
-  "strength": "strong",
-  "scale": {
-    "reference_cold_zone": "CH1",
-    "reference_warm_zone": "T5",
-    "is_beyond_official_quitt_scale_metric": true
-  }
-}
-```
-
-To **neznamená**, že existuje nová oficiální Quittova jednotka například `T7`. Znamená to, že trend odpovídá přibližně dvěma syntetickým rankovým ekvivalentům za teplým okrajem oficiální škály.
-
-Stejná logika funguje i opačným směrem. Záporný trend může znamenat rostoucí přesah za chladný okraj oficiální škály.
-
-### 13.4 Volitelná roční série ve výstupu trendu
-
-Trendové endpointy mohou volitelně vracet roční hodnoty použité pro výpočet trendu. Řídí se to parametrem:
-
-```json
-{
-  "include_yearly_series": true
-}
-```
-
-U velkých mřížkových výstupů to může výrazně zvětšit odpověď. Pro mapové vrstvy je obvykle vhodnější ponechat `include_yearly_series` na hodnotě `false` a mapovat pouze výsledné trendové položky.
-
-## 14. Rozdíl mezi endpointy klimatických zón a klimatických charakteristik
-
-API rozlišuje několik skupin výstupů:
-
-1. **Klimatické charakteristiky – víceleté hodnoty**  
-   Vrací samotné hodnoty indikátorů, například průměrný počet letních dnů nebo úhrn srážek. Plošné endpointy mohou vracet buď všech 11 indikátorů najednou, nebo jeden vybraný indikátor.
-
-2. **Klimatické charakteristiky – trendy**  
-   Vrací Senův trend jednoho vybraného ročního indikátoru pro bod nebo výstupní mřížku.
-
-3. **Klimatické zóny – statická klasifikace**  
-   Vrací výsledek porovnání 11 víceletě zprůměrovaných charakteristik s Quittovou limitní tabulkou, tedy `best_unit` a `best_score`.
-
-4. **Klimatické zóny – trendy**  
-   Vrací trend odvozený z ročních vektorů 11 indikátorů, a to buď metrikou `expected_fuzzy_rank`, nebo `exceedance_rank_equivalent`.
-
-Klimatické zóny jsou tedy odvozený výstup nad klimatickými charakteristikami. Trend klimatických zón je odvozený z ročních hodnot klimatických charakteristik, nikoli z jednoho víceletého průměru.
-
-## 15. Kontroly a validační pravidla
-
-Implementace provádí zejména tyto kontroly:
-
-- existence a čitelnost rasdaman registru,
-- existence zadané rasdaman kolekce v registru,
-- správná struktura kolekce `[year, ind, y, x]`,
-- rozsah indikátorové osy `0:10`,
-- dostupnost požadovaných let,
-- alespoň dva roky pro trendové endpointy,
-- prostorový rozsah bodu nebo `bbox`,
-- numerická validita parametrů `lat`, `lon`, `step_lat`, `step_lon`, `idw_power`, `idw_k`, `idw_radius_px`, `trend_threshold_per_decade` a dalších volitelných parametrů,
-- existence a čitelnost Quittovy limitní tabulky.
-
-Pokud požadovaný časový nebo prostorový rozsah leží mimo data, API vrací validační chybu místo tichého oříznutí výsledku.
-
-## 16. Omezení a interpretace výsledků
-
-Výsledky je nutné interpretovat s ohledem na následující omezení:
-
-1. **Pouze 11 z původních Quittových charakteristik**  
-   Původní Quittovo schéma pracuje s širší sadou charakteristik. Tato implementace používá 11 charakteristik dostupných v datové a výpočetní pipeline.
-
-2. **Algoritmická klasifikace, nikoli ručně generalizovaná mapa**  
-   Výstup je výsledkem opakovatelného výpočtu nad rastrovými daty. Nemusí se shodovat s publikovanou kartografickou mapou, která může zahrnovat generalizaci, expertní zásahy nebo odlišné vážení skupin prvků.
-
-3. **Fuzzy skóre není pravděpodobnost**  
-   `best_score` vyjadřuje podobnost k intervalům, nikoli pravděpodobnost výskytu klimatické jednotky.
-
-4. **Výsledky u hranic zón jsou citlivější**  
-   Pokud místo leží na přechodu mezi klimatickými jednotkami, mohou malé změny období, datové sady nebo interpolace změnit výsledný kód jednotky. Trendová metrika `expected_fuzzy_rank` tuto citlivost snižuje, ale zcela ji neodstraňuje.
-
-5. **Výsledek závisí na zvolené datové kolekci a období**  
-   Stejné místo může být klasifikováno jinak pro historická data, reanalýzu nebo klimatický scénář.
-
-6. **Srážkové a teplotní indikátory mají rozdílnou prostorovou nejistotu**  
-   Některé prvky, zejména srážky nebo charakteristiky spojené se sněhem a oblačností, bývají prostorově nejistější než teplotní charakteristiky. Tato implementace s vynechanými charakteristikami proto nemá být považována za úplnou rekonstrukci původní Quittovy klasifikace.
-
-7. **Směr trendu není automaticky hodnocení dopadu**  
-   Teplejší nebo sušší trend lze v řadě klimatických rizik interpretovat jako nepříznivý, ale samotné API trendové metriky jsou popisné. Výrazy jako `warmer`, `cooler`, `increase`, `decrease`, `beyond_warm_edge_increase` a `beyond_cold_edge_increase` popisují směr změny, nikoli univerzální hodnotový soud.
-
-8. **Exceedance je syntetická metrika za oficiální škálou**  
-   `exceedance_rank_equivalent` je užitečná pro odstranění saturace na okrajích `T5` nebo `CH1`, ale nedefinuje nové oficiální Quittovy jednotky.
-
-## 17. Doporučený způsob citace metodiky v API
-
-V OpenAPI specifikaci lze na tuto metodiku odkázat takto:
-
-```yaml
-externalDocs:
-  description: Metodika výpočtu klimatických zón podle Quittovy klasifikace
-  url: https://<namespace>.gitlab.io/<project>/metodika_klimaticke_zony_quitt/
-```
-
-U konkrétního endpointu:
-
-```yaml
-paths:
-  /climaticzones/grid:
-    post:
-      summary: Výpočet klimatických zón pro území nebo mřížku
-      externalDocs:
-        description: Detailní metodika výpočtu klimatických zón
-        url: https://<namespace>.gitlab.io/<project>/metodika_klimaticke_zony_quitt/
-```
-
-Stejnou metodiku je vhodné odkázat také u trendových endpointů, například `/climaticzones/trend/grid`, protože používají stejnou sadu indikátorů, IDW interpolaci a Quittovu limitní tabulku.
-
-Pokud dokument nebude publikován přes GitLab Pages, ale pouze uložen v repozitáři, lze odkázat na Markdown soubor v GitLabu. Pro veřejné API je však vhodnější publikovat čitelnou HTML verzi přes GitLab Pages.
-
-## 18. Soubory související s implementací
-
-| Soubor | Role ve výpočtu |
-|---|---|
-| `FWF5_API.py` | Flask API a veřejné endpointy |
-| `FWF5_trends.py` | trendové výpočty klimatických charakteristik a klimatických zón |
-| `rasdaman_registry.json` | registr rasdaman kolekcí, časových os, mřížek a souřadnic |
-| `FWF5_quitt_limits_11_rasdaman_index.json` | limitní tabulka Quittových jednotek pro 11 indikátorů |
-| `FWF5_climate_metadata.json` | popisy klimatických charakteristik a zón |
-| `FWF5_quitt_fuzzy_match_point.py` | bodový výpočet klimatické jednotky |
-| `FWF5_quitt_fuzzy_match_area_custom_grid.py` | výpočet klimatických jednotek pro nativní nebo vlastní mřížku |
-| `FWF5_yindicators_custom_grid_means.py` | export víceletých průměrů 11 klimatických charakteristik |
-| `FWF5_yindicators_yearly_point.py` | export ročních hodnot 11 klimatických charakteristik pro bod |
-| `grid_coords_universal.py` | práce se souřadnicemi mřížek, výřezy a IDW interpolací |
-
-## 19. Reprodukovatelnost
-
-Aby byl výsledek reprodukovatelný, je nutné při publikaci výsledků uvádět:
-
-- název použité rasdaman kolekce,
-- verzi rasdaman registru,
-- verzi limitní tabulky Quittových intervalů,
-- počáteční a koncový rok,
-- použitý prostorový rozsah,
-- zda byl výpočet proveden na nativní nebo vlastní mřížce,
-- hodnoty parametrů `idw_power`, `idw_k`, `idw_radius_px` a případně `idw_max_dist_m`,
-- u trendových výstupů trendovou metodu a metriku, například `sen_slope_yearly` a `expected_fuzzy_rank`,
-- hodnotu `trend_threshold_per_decade`, pokud byla použita jiná než výchozí,
-- zda byly ve výstupu zahrnuty roční série,
-- verzi API nebo commit repozitáře.
-
-Doporučený minimální záznam metadat pro statický výpočet klimatické zóny:
-
-```json
-{
-  "method": "quitt_fuzzy_match_11_indicators",
-  "rasdaman_collection": "era5l_cz_yindicators",
-  "start_year": 1991,
-  "end_year": 2020,
-  "quitt_limits": "FWF5_quitt_limits_11_rasdaman_index.json",
-  "idw": {
-    "power": 2.0,
-    "k_nearest": 9,
-    "radius_px": 2,
-    "max_dist_m": null
-  },
-  "output": "GeoJSON FeatureCollection"
-}
-```
-
-Doporučený minimální záznam metadat pro trend klimatických zón:
-
-```json
-{
-  "method": "sen_slope_yearly",
-  "trend_metric": "expected_fuzzy_rank",
-  "rasdaman_collection": "era5l_cz_yindicators",
-  "start_year": 1991,
-  "end_year": 2020,
-  "quitt_limits": "FWF5_quitt_limits_11_rasdaman_index.json",
-  "idw": {
-    "power": 2.0,
-    "k_nearest": 9,
-    "radius_px": 2,
-    "max_dist_m": null
-  },
-  "trend_threshold_per_decade": 0.25,
-  "include_yearly_series": false,
-  "output": "GeoJSON FeatureCollection"
-}
-```
-
-Pro trend klimatických zón založený na přesahu mimo okraje škály se nastaví:
-
-```json
-{
-  "trend_metric": "exceedance_rank_equivalent"
-}
-```
-
-## 20. Shrnutí metodiky v jedné větě
-
-Statická klimatická zóna se určí tak, že se pro zadané místo a období spočítá nebo interpoluje 11 víceletých klimatických charakteristik, ty se porovnají s intervaly 23 Quittových klimatických jednotek a jako výsledek se vybere jednotka s nejvyšší fuzzy mírou shody; trendové endpointy používají roční hodnoty všech let zvoleného období a pomocí Senovy směrnice počítají trendy buď pro jednotlivé indikátory, nebo pro metriky klimatických zón `expected_fuzzy_rank` a `exceedance_rank_equivalent`.
+Intervaly nemají být používány izolovaně jako jednoduchý rozhodovací strom. Implementace hodnotí všech jedenáct charakteristik společně a mimo interval používá plynule klesající fuzzy podobnost. UPOL/ČHMÚ současně upozorňuje, že původní číselné meze jsou orientační a různé realizace klasifikace mohou vést k odlišným mapám [1, s. 18; PDF s. 19].

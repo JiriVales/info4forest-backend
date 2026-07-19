@@ -97,16 +97,6 @@ Pro zvolený bod aplikace uvádí:
 
 „Významný“ v tomto kontextu znamená **statisticky průkazný**, nikoli automaticky ekologicky nebo hospodářsky významný.
 
-### 2.6 Ukázky rozhraní
-
-![Mapa klimatických oblastí a analytický panel workflow WF5](info4forest_WF5_ukazka_mapy.png)
-
-*Obrázek 1: Základní zobrazení mapy klimatických oblastí, volby zdroje a období a detailu klimatické jednotky s charakteristikami.*
-
-![Workflow WF5 v kontextu aplikace Info4forest](info4forest_WF5_ukazka_aplikace.png)
-
-*Obrázek 2: Workflow WF5 v prostředí aplikace Info4forest včetně projektové navigace a panelu výsledků.*
-
 ---
 
 ## 3. Jak číst hlavní výsledky

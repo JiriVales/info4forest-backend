@@ -1,19 +1,16 @@
-# Info4forest WF5: klimatické oblasti inspirované Quittovou klasifikací
+# Info4forest: klimatické oblasti inspirované Quittovou klasifikací
 
 ## Popis vizualizace a metodika výpočtu
 
 **Verze dokumentu:** 3.0  
 **Datum revize:** 2026-07-19  
-**Určení dokumentu:** věcný popis workflow WF5 v aplikaci Info4forest, vysvětlení zobrazovaných výsledků a transparentní metodika jejich výpočtu.  
+**Určení dokumentu:** věcný popis klimatických oblastí v aplikaci Info4forest, vysvětlení zobrazovaných výsledků a transparentní metodika jejich výpočtu.  
 **Metodický základ:** Quittova klasifikace klimatu a její rozbor v publikaci Univerzity Palackého v Olomouci a Českého hydrometeorologického ústavu [1].  
 
-> Tento dokument není návodem k ovládání jednotlivých tlačítek ani příručkou k API endpointům. Vysvětluje především, **co aplikace Info4forest ve workflow WF5 zobrazuje, co výsledky znamenají, z jakých dat vycházejí a jak jsou vypočteny**.
-
 ---
-
 ## Obsah
 
-1. Co je workflow WF5
+1. Co jsou klimatické oblasti inspirované Quittovou klasifikací
 2. Co aplikace zobrazuje
 3. Jak číst hlavní výsledky
 4. Klimatické zdroje a sledované lokality
@@ -30,9 +27,9 @@
 
 ---
 
-## 1. Co je workflow WF5
+## 1. Co jsou klimatické oblasti inspirované Quittovou klasifikací
 
-Workflow **WF5 – Forest-related Climate Area Map** v aplikaci Info4forest převádí klimatická data do srozumitelné mapy klimatických oblastí a souvisejících charakteristik. Uživatel zvolí klimatický zdroj, lokalitu a období. Aplikace následně ukáže, kterému typu klimatu se jednotlivá místa v daném období nejvíce podobají.
+Záložka **WF5 – Forest-related Climate Area Map** v aplikaci Info4forest převádí klimatická data do srozumitelné mapy klimatických oblastí a souvisejících charakteristik. Uživatel zvolí klimatický zdroj, lokalitu a období. Aplikace následně ukáže, kterému typu klimatu se jednotlivá místa v daném období nejvíce podobají.
 
 Výsledek není založen pouze na jedné veličině, například na průměrné teplotě. Pro každé místo se společně vyhodnocuje jedenáct teplotních a srážkových charakteristik. Patří mezi ně počet letních, mrazových a ledových dnů, teploty ve čtyřech reprezentativních měsících, počet srážkových dnů a sezónní srážkové úhrny.
 

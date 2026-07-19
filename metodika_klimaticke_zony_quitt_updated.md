@@ -492,11 +492,11 @@ Příklad:
 
 ### Technické zdroje implementace
 
-**[T1]** `FWF5_API(10).py` – API vrstva, validace vstupů, katalog, výpočetní orchestrace a formát odpovědí.  
-**[T2]** `FWF5_trends(11).py` – Senova směrnice, Mannův–Kendallův test, trend klimatických jednotek a nepříznivé epizody.  
-**[T3]** `FWF5_climate_metadata(3).json` – české a anglické názvy, kódy a slovní popisy klimatických jednotek a charakteristik.  
-**[T4]** `climate_source_catalog(6).json` – katalog klimatických zdrojů, lokalit, laických a technických názvů a názvů Rasdaman kolekcí.  
-**[T5]** `FWF5_quitt_limits_11_rasdaman_index(3).json`, `FWF5_quitt_fuzzy_match_point(3).py` a `FWF5_quitt_fuzzy_match_area_custom_grid(3).py` – limitní intervaly, fuzzy skórování, IDW a pořadí klimatických jednotek.  
+**[T1]** `FWF5_API.py` – API vrstva, validace vstupů, katalog, výpočetní orchestrace a formát odpovědí.  
+**[T2]** `FWF5_trends.py` – Senova směrnice, Mannův–Kendallův test, trend klimatických jednotek a nepříznivé epizody.  
+**[T3]** `FWF5_climate_metadata.json` – české a anglické názvy, kódy a slovní popisy klimatických jednotek a charakteristik.  
+**[T4]** `climate_source_catalog.json` – katalog klimatických zdrojů, lokalit, laických a technických názvů a názvů Rasdaman kolekcí.  
+**[T5]** `FWF5_quitt_limits_11_rasdaman_index.json`, `FWF5_quitt_fuzzy_match_point.py` a `FWF5_quitt_fuzzy_match_area_custom_grid.py` – limitní intervaly, fuzzy skórování, IDW a pořadí klimatických jednotek.  
 **[T6]** OpenAPI dokumentace FWF5 Climate API: <https://app.swaggerhub.com/apis/JIRKAVALES_1/Info4forest/1.0.0>.
 
 ---
